@@ -370,9 +370,6 @@
     </div>
 
     <script>
-        // Target live tunnel URL:
-        let LIVE_TUNNEL_ENDPOINT = "wss://subd.domain.com/ws";
-
         // Sample encrypted payload
         let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "XBiuI6KfEjchMlmRzVGDww==:uz2WFKtGaQwwBMi+:XH8+UCc4qfFzXC20fCJL/VboSuCA6dsCKBDWFZk8M8ChoBOWW+EjpCo=";
 
@@ -474,10 +471,6 @@
 
         // Decrypt Encrypted Payload
         async function decryptPayload(packedPayload, password) {
-            if (password === "termux123") {
-                return LIVE_TUNNEL_ENDPOINT;
-            }
-
             const parts = packedPayload.split(':');
             if (parts.length !== 3) {
                 throw new Error("Invalid payload format (expected Salt:IV:Ciphertext)");
@@ -502,14 +495,6 @@
 
             const dec = new TextDecoder();
             return dec.decode(decrypted);
-        }
-
-        async function initDefaultPayload() {
-            try {
-                HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = await encryptPayload(LIVE_TUNNEL_ENDPOINT, "termux123");
-            } catch (err) {
-                console.warn("Using fallback decryption handler for active payload.", err);
-            }
         }
 
         async function generateEncryptedPayload() {
@@ -936,9 +921,8 @@
                 .replace(/'/g, "&#039;");
         }
 
-        // Initialize Focus & Default Payload
+        // Initialize Focus
         window.onload = function() {
-            initDefaultPayload();
             focusPrompt();
 
             if (cmdInput) {
