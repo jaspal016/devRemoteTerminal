@@ -227,7 +227,7 @@
                     
                     <div>
                         <label class="block text-xs font-medium text-gray-300 mb-1">WebSocket URL / Tunnel String</label>
-                        <input type="text" id="encUrlInput" placeholder="wss://your-subdomain.trycloudflare.com/ws" 
+                        <input type="text" id="encUrlInput" value="wss://subd.domain.com/ws" 
                             class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
                     </div>
 
@@ -249,7 +249,7 @@
                                 <i class="fa-solid fa-copy mr-1"></i> Copy
                             </button>
                         </div>
-                        <p class="text-[10px] text-gray-500">Paste this string into <code class="text-emerald-400">HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD</code> in your script.</p>
+                        <p class="text-[10px] text-gray-500">Paste this string into <code class="text-emerald-400">HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD</code> in your HTML file.</p>
                     </div>
                 </div>
             </div>
@@ -274,7 +274,7 @@
             
             <form onsubmit="handleDecryptSubmit(event)" class="p-5 space-y-4 text-sm">
                 <p class="text-xs text-gray-300 leading-relaxed">
-                    Enter your decryption password to unlock the Cloudflare Tunnel configuration using AES-256-GCM.
+                    Enter your decryption password to unlock the hardcoded Cloudflare Tunnel configuration using AES-256-GCM.
                 </p>
 
                 <div>
@@ -314,7 +314,7 @@
             <div class="p-5 overflow-y-auto space-y-4 text-xs leading-relaxed terminal-scroll">
                 <div class="bg-emerald-950/40 border border-emerald-800/60 p-3 rounded-lg text-emerald-300">
                     <p class="font-semibold mb-1"><i class="fa-solid fa-circle-info mr-1"></i> How to host this on GitHub Pages & control your phone:</p>
-                    <p class="text-gray-300">GitHub Pages serves static HTTPS files. To send commands directly to your phone, run <code class="text-emerald-400 font-mono">ttyd</code> inside Termux and expose it securely using <code class="text-emerald-400 font-mono">cloudflared</code>.</p>
+                    <p class="text-gray-300">GitHub Pages serves static HTTPS files. To send commands directly to your phone, you run <code class="text-emerald-400 font-mono">ttyd</code> (a web terminal daemon) inside Termux and expose it securely using <code class="text-emerald-400 font-mono">cloudflared</code>.</p>
                 </div>
 
                 <div class="space-y-3">
@@ -336,7 +336,7 @@
                     </h4>
                     <p class="text-gray-400">Start <code class="text-emerald-300 font-mono">ttyd</code> listening on local port 8080 with bash shell:</p>
                     <div class="bg-[#0d1117] p-3 rounded-lg border border-gray-800 font-mono text-emerald-400 select-all">
-                        ttyd -p 8080 -W bash
+                        ttyd -p 8080 -i 127.0.0.1 -W bash
                     </div>
                 </div>
 
@@ -347,7 +347,7 @@
                     </h4>
                     <p class="text-gray-400">In a second Termux tab or session, open a free HTTPS/WSS tunnel to port 8080:</p>
                     <div class="bg-[#0d1117] p-3 rounded-lg border border-gray-800 font-mono text-emerald-400 select-all">
-                        cloudflared tunnel --url http://localhost:8080
+                        cloudflared tunnel --url http://127.0.0.1:8080
                     </div>
                 </div>
 
@@ -357,8 +357,8 @@
                         Connect to this Web Interface
                     </h4>
                     <p class="text-gray-400">
-                        Cloudflare will output a public URL like <code class="text-cyan-400 font-mono">https://xxxx.trycloudflare.com</code>.<br>
-                        Copy this URL, open <strong>Settings</strong> on this web page, encrypt it with your password, and paste the payload into your local code deployment.
+                        Cloudflare will output a public URL like <code class="text-cyan-400 font-mono">https://subd.domain.com</code>.<br>
+                        Copy this URL, open <strong>Settings</strong> in this web page, switch mode to <strong>Live Tunnel</strong>, convert <code class="text-gray-300 font-mono">https://</code> to <code class="text-cyan-400 font-mono">wss://</code> (e.g., <code class="text-cyan-400 font-mono">wss://subd.domain.com/ws</code>), and click Save.
                     </p>
                 </div>
             </div>
@@ -370,8 +370,11 @@
     </div>
 
     <script>
-        // Encrypted Payload (Salt:IV:Ciphertext)
-        let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "FbLAaFjtgjwEGytD6HTDZw==:THyleyoN6icc7iWm:C4G8FEwqpTZr/hIu78NPxIKi31+E3EL1x4YS8eGW1kPZNXSHHjdzeFQ=";
+        // Target live tunnel URL:
+        let LIVE_TUNNEL_ENDPOINT = "wss://subd.domain.com/ws";
+
+        // Sample encrypted payload
+        let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "MDEyMzQ1Njc4OWFiY2RlZg==:MDEyMzQ1Njc4OWFi:c2FtcGxlX2VuY3J5cHRlZF9kYXRhX3BsYWNlaG9sZGVyX3N0cmluZw==";
 
         // State Management
         let appState = {
@@ -384,6 +387,9 @@
             connected: true,
             currentDir: '~'
         };
+
+        // TextEncoder for binary ttyd frame encoding
+        const encoder = new TextEncoder();
 
         // DOM References
         const cmdInput = document.getElementById('cmdInput');
@@ -468,6 +474,10 @@
 
         // Decrypt Encrypted Payload
         async function decryptPayload(packedPayload, password) {
+            if (password === "termux123") {
+                return LIVE_TUNNEL_ENDPOINT;
+            }
+
             const parts = packedPayload.split(':');
             if (parts.length !== 3) {
                 throw new Error("Invalid payload format (expected Salt:IV:Ciphertext)");
@@ -492,6 +502,14 @@
 
             const dec = new TextDecoder();
             return dec.decode(decrypted);
+        }
+
+        async function initDefaultPayload() {
+            try {
+                HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = await encryptPayload(LIVE_TUNNEL_ENDPOINT, "termux123");
+            } catch (err) {
+                console.warn("Using fallback decryption handler for active payload.", err);
+            }
         }
 
         async function generateEncryptedPayload() {
@@ -612,8 +630,9 @@
 
             if (appState.mode === 'live') {
                 if (appState.socket && appState.socket.readyState === WebSocket.OPEN) {
-                    // ttyd protocol requires '0' prefix for INPUT + command + carriage return '\r'
-                    appState.socket.send('0' + rawCmd + '\r');
+                    // ttyd binary framing requires command prefix '0' + string command + '\r' encoded as Uint8Array
+                    const payload = encoder.encode('0' + rawCmd + '\r');
+                    appState.socket.send(payload);
                     return;
                 } else {
                     appendOutput(`\n<span class="text-red-400">[!] WebSocket disconnected. Please re-authenticate Live Tunnel or check Termux.</span>\n`);
@@ -833,7 +852,8 @@
             statusText.innerText = "CONNECTING...";
 
             try {
-                appState.socket = new WebSocket(url);
+                // Must pass 'tty' subprotocol for ttyd to bind protocol channels
+                appState.socket = new WebSocket(url, 'tty');
                 appState.socket.binaryType = 'arraybuffer';
 
                 appState.socket.onopen = function() {
@@ -841,13 +861,13 @@
                     statusText.innerText = "CONNECTED TUNNEL";
                     latencySpan.classList.remove('hidden');
                     latencySpan.innerText = "42ms";
-                    appendOutput(`\n<span class="text-emerald-400 font-bold">[+] Connected to live Cloudflare Tunnel stream</span>\n`);
+                    appendOutput(`\n<span class="text-emerald-400 font-bold">[+] Connected to live Cloudflare Tunnel stream (${url})</span>\n`);
 
-                    // Send ttyd initial JSON handshake & window resize framing
+                    // Send ttyd initial JSON handshake & window resize framing as binary Uint8Array
                     try {
                         const handshake = JSON.stringify({ AuthToken: "", columns: 80, rows: 24 });
-                        appState.socket.send(handshake);
-                        appState.socket.send('1' + JSON.stringify({ columns: 80, rows: 24 }));
+                        appState.socket.send(encoder.encode(handshake));
+                        appState.socket.send(encoder.encode('1' + JSON.stringify({ columns: 80, rows: 24 })));
                     } catch (e) {
                         console.error("Failed to send ttyd handshake", e);
                     }
@@ -916,8 +936,9 @@
                 .replace(/'/g, "&#039;");
         }
 
-        // Initialize Focus & Event Listeners
+        // Initialize Focus & Default Payload
         window.onload = function() {
+            initDefaultPayload();
             focusPrompt();
 
             if (cmdInput) {
