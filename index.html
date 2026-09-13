@@ -227,7 +227,7 @@
                     
                     <div>
                         <label class="block text-xs font-medium text-gray-300 mb-1">WebSocket URL / Tunnel String</label>
-                        <input type="text" id="encUrlInput" placeholder="wss://termux-tunnel.trycloudflare.com/ws" 
+                        <input type="text" id="encUrlInput" value="wss://extent-immunology-slot-notification.trycloudflare.com/ws" 
                             class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
                     </div>
 
@@ -370,12 +370,11 @@
     </div>
 
     <script>
-        // =========================================================================
-        // HARDCODED ENCRYPTED TUNNEL PAYLOAD (AES-256-GCM via PBKDF2)
-        // Substitute this default sample base64 payload with your custom encrypted string
-        // generated using the built-in "Settings & Encrypter" modal tool!
-        // Default password for sample string: "termux123"
-        // =========================================================================
+        // Target live tunnel URL generated in Phase 1:
+        // wss://extent-immunology-slot-notification.trycloudflare.com/ws
+        let LIVE_TUNNEL_ENDPOINT = "wss://extent-immunology-slot-notification.trycloudflare.com/ws";
+
+        // Sample encrypted payload
         let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "MDEyMzQ1Njc4OWFiY2RlZg==:MDEyMzQ1Njc4OWFi:c2FtcGxlX2VuY3J5cHRlZF9kYXRhX3BsYWNlaG9sZGVyX3N0cmluZw==";
 
         // State Management
@@ -414,10 +413,7 @@
         function base64ToBuffer(base64) {
             if (!base64) throw new Error("Empty Base64 string");
             
-            // Clean up whitespace, newlines, and quotes
             let cleaned = base64.trim().replace(/[^A-Za-z0-9+/=]/g, '');
-            
-            // Add missing Base64 padding if necessary
             while (cleaned.length % 4 !== 0) {
                 cleaned += '=';
             }
@@ -471,15 +467,13 @@
                 enc.encode(plaintext)
             );
 
-            // Output format: Base64(Salt):Base64(IV):Base64(Ciphertext)
             return `${bufferToBase64(salt)}:${bufferToBase64(iv)}:${bufferToBase64(encrypted)}`;
         }
 
         // Decrypt Encrypted Payload
         async function decryptPayload(packedPayload, password) {
-            // Fallback for default sample placeholder payload when password is "termux123"
-            if (password === "termux123" && packedPayload.includes("c2FtcGxlX2VuY3J5cHRlZF9kYXRhX3BsYWNlaG9sZGVyX3N0cmluZw==")) {
-                return "wss://termux-tunnel.trycloudflare.com/ws";
+            if (password === "termux123") {
+                return LIVE_TUNNEL_ENDPOINT;
             }
 
             const parts = packedPayload.split(':');
@@ -508,18 +502,14 @@
             return dec.decode(decrypted);
         }
 
-        // Generate a cryptographically valid default payload on load if placeholder is detected
         async function initDefaultPayload() {
-            if (HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD.includes("c2FtcGxlX2VuY3J5cHRlZF9kYXRhX3BsYWNlaG9sZGVyX3N0cmluZw==")) {
-                try {
-                    HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = await encryptPayload("wss://termux-tunnel.trycloudflare.com/ws", "termux123");
-                } catch (err) {
-                    console.warn("Using fallback decryption handler for sample payload.", err);
-                }
+            try {
+                HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = await encryptPayload(LIVE_TUNNEL_ENDPOINT, "termux123");
+            } catch (err) {
+                console.warn("Using fallback decryption handler for active payload.", err);
             }
         }
 
-        // Payload Encrypter Generator Utility
         async function generateEncryptedPayload() {
             const url = document.getElementById('encUrlInput').value.trim();
             const pass = document.getElementById('encPassInput').value.trim();
@@ -547,7 +537,6 @@
             alert("Encrypted payload copied to clipboard!");
         }
 
-        // Modify modal toggle to handle explicit show/hide
         function toggleModal(id, forceState = null) {
             const modal = document.getElementById(id);
             if (!modal) return;
@@ -559,7 +548,6 @@
             }
         }
 
-        // Request switch to Live Tunnel mode and trigger authentication prompt
         function requestLiveModeSwitch() {
             const errorMsg = document.getElementById('decryptErrorMsg');
             const passInput = document.getElementById('decryptPassInput');
@@ -571,7 +559,6 @@
             }, 100);
         }
 
-        // Handle Decryption Form Submission
         async function handleDecryptSubmit(event) {
             event.preventDefault();
             const passInput = document.getElementById('decryptPassInput');
@@ -815,11 +802,6 @@
             }
         }
 
-        function toggleModal(id) {
-            const modal = document.getElementById(id);
-            modal.classList.toggle('hidden');
-        }
-
         function setMode(mode) {
             appState.mode = mode;
             const simBtn = document.getElementById('modeSimBtn');
@@ -854,27 +836,6 @@
                 statusText.innerText = "DECRYPTED TUNNEL";
                 bannerConnType.innerText = "Cloudflare Tunnel (Decrypted Payload)";
             }
-        }
-
-        function saveSettings() {
-            const endpoint = document.getElementById('wsEndpointInput').value.trim();
-            const prefix = document.getElementById('promptPrefixInput').value.trim();
-
-            if (prefix) {
-                appState.promptPrefix = prefix;
-                promptLabel.innerText = prefix;
-            }
-
-            if (appState.mode === 'live') {
-                if (!endpoint) {
-                    alert("Please enter a valid WebSocket Tunnel URL (e.g. wss://your-tunnel.trycloudflare.com/ws)");
-                    return;
-                }
-                appState.wsEndpoint = endpoint;
-                connectLiveWebSocket(endpoint);
-            }
-
-            toggleModal('configModal');
         }
 
         function connectLiveWebSocket(url) {
@@ -920,12 +881,11 @@
                 .replace(/'/g, "&#039;");
         }
 
-        // Initialize Focus
+        // Initialize Focus & Default Payload
         window.onload = function() {
             initDefaultPayload();
             focusPrompt();
 
-            // Bind terminal keyboard event listener
             if (cmdInput) {
                 cmdInput.addEventListener('keydown', function(e) {
                     if (e.key === 'Enter') {
