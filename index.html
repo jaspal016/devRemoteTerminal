@@ -4,50 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Termux Remote Terminal & Tunnel Bridge</title>
+    
+    <!-- External UI Libraries -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
-    <!-- xterm.js CDN -->
+    <!-- xterm.js Library -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
 
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
-        
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #090d16;
-            color: #e2e8f0;
-        }
-
-        .terminal-container {
-            box-shadow: 0 0 30px rgba(0, 255, 170, 0.05), inset 0 0 15px rgba(0, 0, 0, 0.8);
-        }
-
-        .xterm .xterm-viewport::-webkit-scrollbar {
-            width: 8px;
-        }
-        .xterm .xterm-viewport::-webkit-scrollbar-track {
-            background: #0d1117;
-        }
-        .xterm .xterm-viewport::-webkit-scrollbar-thumb {
-            background: #21262d;
-            border-radius: 4px;
-        }
-
-        .scanlines {
-            background: linear-gradient(
-                to bottom,
-                rgba(255,255,255,0),
-                rgba(255,255,255,0) 50%,
-                rgba(0, 0, 0, 0.25) 50%,
-                rgba(0, 0, 0, 0.25)
-            );
-            background-size: 100% 4px;
-        }
-    </style>
+    <!-- Local Stylesheet -->
+    <link rel="stylesheet" href="style.css">
 </head>
 <body class="h-screen flex flex-col overflow-hidden bg-[#090d16] text-gray-200">
 
@@ -123,12 +92,12 @@
         </div>
     </main>
 
-    <!-- Encryption Helper Modal -->
+    <!-- Encrypter Modal -->
     <div id="configModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
         <div class="bg-[#161b22] border border-gray-800 rounded-xl w-full max-w-lg overflow-hidden shadow-2xl">
             <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
                 <h3 class="font-bold text-gray-100 flex items-center gap-2 text-sm">
-                    <i class="fa-solid fa-shield-halved text-emerald-400"></i> Cloudflare Tunnel Payload Encrypter
+                    <i class="fa-solid fa-shield-halved text-emerald-400"></i> Tunnel Payload Encrypter
                 </h3>
                 <button onclick="toggleModal('configModal')" class="text-gray-400 hover:text-white">
                     <i class="fa-solid fa-xmark text-lg"></i>
@@ -160,7 +129,7 @@
                             <i class="fa-solid fa-copy mr-1"></i> Copy
                         </button>
                     </div>
-                    <p class="text-[10px] text-gray-500">Paste this string into <code class="text-emerald-400">HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD</code> in the JavaScript below.</p>
+                    <p class="text-[10px] text-gray-500">Paste this payload into <code class="text-emerald-400">HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD</code> in <code class="text-emerald-400">tunnel.js</code>.</p>
                 </div>
             </div>
 
@@ -209,299 +178,8 @@
         </div>
     </div>
 
-    <script>
-        // =========================================================================
-        // PASTE YOUR GENERATED AES-256 BASE64 PAYLOAD HERE
-        // =========================================================================
-        let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "XBiuI6KfEjchMlmRzVGDww==:uz2WFKtGaQwwBMi+:XH8+UCc4qfFzXC20fCJL/VboSuCA6dsCKBDWFZk8M8ChoBOWW+EjpCo=";
-
-        let term;
-        let fitAddon;
-        let socket = null;
-        const encoder = new TextEncoder();
-
-        // --- Crypto Helpers ---
-        function base64ToBytes(base64) {
-            let cleaned = base64.trim().replace(/[\s"'\r\n]/g, '');
-            cleaned = cleaned.replace(/-/g, '+').replace(/_/g, '/');
-            const pad = cleaned.length % 4;
-            if (pad === 2) cleaned += '==';
-            else if (pad === 3) cleaned += '=';
-
-            const binString = atob(cleaned);
-            return Uint8Array.from(binString, (m) => m.charCodeAt(0));
-        }
-
-        function bufferToBase64(buf) {
-            const bytes = new Uint8Array(buf);
-            let binary = '';
-            for (let i = 0; i < bytes.byteLength; i++) {
-                binary += String.fromCharCode(bytes[i]);
-            }
-            return btoa(binary);
-        }
-
-        async function deriveKey(password, salt) {
-            const enc = new TextEncoder();
-            const keyMaterial = await window.crypto.subtle.importKey(
-                "raw",
-                enc.encode(password),
-                { name: "PBKDF2" },
-                false,
-                ["deriveKey"]
-            );
-            return window.crypto.subtle.deriveKey(
-                {
-                    name: "PBKDF2",
-                    salt: salt,
-                    iterations: 100000,
-                    hash: "SHA-256"
-                },
-                keyMaterial,
-                { name: "AES-GCM", length: 256 },
-                false,
-                ["encrypt", "decrypt"]
-            );
-        }
-
-        async function encryptPayload(plaintext, password) {
-            const enc = new TextEncoder();
-            const salt = window.crypto.getRandomValues(new Uint8Array(16));
-            const iv = window.crypto.getRandomValues(new Uint8Array(12));
-            const key = await deriveKey(password, salt);
-
-            const encrypted = await window.crypto.subtle.encrypt(
-                { name: "AES-GCM", iv: iv },
-                key,
-                enc.encode(plaintext)
-            );
-
-            const combined = new Uint8Array(16 + 12 + encrypted.byteLength);
-            combined.set(salt, 0);
-            combined.set(iv, 16);
-            combined.set(new Uint8Array(encrypted), 28);
-
-            return bufferToBase64(combined);
-        }
-
-        async function decryptEndpoint(passphrase, base64Data) {
-            const encryptedBytes = base64ToBytes(base64Data);
-
-            if (encryptedBytes.length < 28) {
-                throw new Error("Payload too short. Expected Salt (16) + IV (12) + Ciphertext.");
-            }
-
-            const salt = encryptedBytes.subarray(0, 16);
-            const iv = encryptedBytes.subarray(16, 28);
-            const ciphertext = encryptedBytes.subarray(28);
-
-            const key = await deriveKey(passphrase, salt);
-
-            const decryptedBuffer = await window.crypto.subtle.decrypt(
-                { name: "AES-GCM", iv: iv },
-                key,
-                ciphertext
-            );
-
-            return new TextDecoder().decode(decryptedBuffer);
-        }
-
-        async function generateEncryptedPayload() {
-            const url = document.getElementById('encUrlInput').value.trim();
-            const pass = document.getElementById('encPassInput').value.trim();
-            const resultBox = document.getElementById('encResultContainer');
-            const resultText = document.getElementById('encResultText');
-
-            if (!url || !pass) {
-                alert("Please provide both a WebSocket URL and an Encryption Password.");
-                return;
-            }
-
-            try {
-                const encryptedBase64 = await encryptPayload(url, pass);
-                resultText.value = encryptedBase64;
-                resultBox.classList.remove('hidden');
-            } catch (err) {
-                alert("Error generating encrypted payload: " + err.message);
-            }
-        }
-
-        function copyEncryptedPayload() {
-            const textarea = document.getElementById('encResultText');
-            textarea.select();
-            document.execCommand('copy');
-            alert("Encrypted payload copied to clipboard!");
-        }
-
-        // --- Auth UI & Tunnel Handlers ---
-        function requestLiveModeSwitch() {
-            const errorMsg = document.getElementById('decryptErrorMsg');
-            const passInput = document.getElementById('decryptPassInput');
-            if (errorMsg) errorMsg.classList.add('hidden');
-            if (passInput) passInput.value = '';
-            toggleModal('decryptModal', true);
-            setTimeout(() => { if (passInput) passInput.focus(); }, 100);
-        }
-
-        async function handleDecryptSubmit(event) {
-            event.preventDefault();
-            const passInput = document.getElementById('decryptPassInput');
-            const errorMsg = document.getElementById('decryptErrorMsg');
-            const submitBtn = document.getElementById('decryptSubmitBtn');
-
-            const password = passInput ? passInput.value : '';
-            if (!password) return;
-
-            try {
-                if (submitBtn) submitBtn.disabled = true;
-                const decryptedUrl = await decryptEndpoint(password, HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD);
-                
-                if (errorMsg) errorMsg.classList.add('hidden');
-                toggleModal('decryptModal', false);
-                
-                connectWebSocket(decryptedUrl);
-            } catch (err) {
-                console.error("Decryption failed:", err);
-                if (errorMsg) {
-                    errorMsg.classList.remove('hidden');
-                    const errTextSpan = errorMsg.querySelector('span');
-                    if (errTextSpan) {
-                        errTextSpan.innerText = err.message || "Invalid password or corrupted payload.";
-                    }
-                }
-            } finally {
-                if (submitBtn) submitBtn.disabled = false;
-            }
-        }
-
-        // --- Terminal Execution & Connection ---
-        function initTerminal() {
-            term = new Terminal({
-                cursorBlink: true,
-                fontFamily: "'Fira Code', monospace",
-                fontSize: 14,
-                theme: {
-                    background: '#0d1117',
-                    foreground: '#e2e8f0',
-                    cursor: '#00ffaa',
-                    selectionBackground: '#21262d',
-                    black: '#0d1117',
-                    red: '#ff5555',
-                    green: '#50fa7b',
-                    yellow: '#f1fa8c',
-                    blue: '#bd93f9',
-                    magenta: '#ff79c6',
-                    cyan: '#8be9fd',
-                    white: '#bfbfbf'
-                }
-            });
-
-            fitAddon = new FitAddon.FitAddon();
-            term.loadAddon(fitAddon);
-            term.loadAddon(new WebLinksAddon.WebLinksAddon());
-
-            term.open(document.getElementById('terminal'));
-            fitAddon.fit();
-
-            term.writeln('\x1b[1;32m=== TERMUX CLOUDFLARE BRIDGE ===\x1b[0m');
-            term.writeln('Click "Connect Live Shell" to decrypt your tunnel link and connect.\r\n');
-
-            term.onData(data => {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    const payload = new Uint8Array(data.length + 1);
-                    payload[0] = '0'.charCodeAt(0);
-                    for (let i = 0; i < data.length; i++) {
-                        payload[i + 1] = data.charCodeAt(i);
-                    }
-                    socket.send(payload.buffer);
-                }
-            });
-
-            window.addEventListener('resize', () => {
-                fitAddon.fit();
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    sendWindowSize();
-                }
-            });
-        }
-
-        function connectWebSocket(url) {
-            const statusText = document.getElementById('statusText');
-            statusText.innerText = "CONNECTING...";
-
-            if (socket) socket.close();
-
-            try {
-                socket = new WebSocket(url, 'tty');
-                socket.binaryType = 'arraybuffer';
-
-                socket.onopen = () => {
-                    statusText.innerText = "CONNECTED";
-                    term.clear();
-                    term.writeln('\x1b[1;32m[+] Connected to live Cloudflare Tunnel stream.\x1b[0m\r\n');
-                    sendWindowSize();
-                };
-
-                socket.onmessage = (event) => {
-                    if (event.data instanceof ArrayBuffer) {
-                        const view = new Uint8Array(event.data);
-                        if (view.length === 0) return;
-                        
-                        // Strip ttyd command prefix byte ('0')
-                        const data = view.subarray(1);
-                        term.write(data);
-                    }
-                };
-
-                socket.onclose = () => {
-                    statusText.innerText = "DISCONNECTED";
-                    term.writeln('\r\n\x1b[1;31m[!] Tunnel Connection closed.\x1b[0m');
-                };
-
-                socket.onerror = (err) => {
-                    statusText.innerText = "ERROR";
-                    term.writeln('\r\n\x1b[1;31m[!] WebSocket Error.\x1b[0m');
-                };
-
-            } catch (err) {
-                term.writeln(`\r\n\x1b[1;31m[!] Failed to connect: ${err.message}\x1b[0m`);
-            }
-        }
-
-        function sendWindowSize() {
-            const dimensions = JSON.stringify({ columns: term.cols, rows: term.rows });
-            socket.send(encoder.encode('1' + dimensions));
-        }
-
-        function sendRawData(data) {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                const payload = new Uint8Array(data.length + 1);
-                payload[0] = '0'.charCodeAt(0);
-                for (let i = 0; i < data.length; i++) {
-                    payload[i + 1] = data.charCodeAt(i);
-                }
-                socket.send(payload.buffer);
-            }
-        }
-
-        function clearTerminal() {
-            term.clear();
-        }
-
-        function toggleScanlines() {
-            document.getElementById('scanlinesOverlay').classList.toggle('hidden');
-        }
-
-        function toggleModal(id, force) {
-            const modal = document.getElementById(id);
-            if (force !== undefined) {
-                modal.classList.toggle('hidden', !force);
-            } else {
-                modal.classList.toggle('hidden');
-            }
-        }
-
-        window.onload = initTerminal;
-    </script>
+    <!-- Application Logic (tunnel.js must be loaded before script.js) -->
+    <script src="tunnel.js"></script>
+    <script src="script.js"></script>
 </body>
 </html>
