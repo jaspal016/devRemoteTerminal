@@ -73,7 +73,10 @@ function connectWebSocket(url) {
             // 1. Send ttyd initial Auth handshake
             socket.send(JSON.stringify({ AuthToken: "" }));
 
-            // 2. Send initial window resize to trigger prompt rendering
+            // 2. Force fitAddon to re-calculate current container pixel size
+            fitAddon.fit();
+
+            // 3. Send initial window dimensions to align Termux pty buffer with xterm.js
             sendWindowSize();
         };
 
@@ -86,18 +89,15 @@ function connectWebSocket(url) {
             } else {
                 return;
             }
-        
+
             if (rawData.length === 0) return;
-        
-            // First byte is the ttyd command code
+
+            // Strip ttyd command prefix byte ('0' for OUTPUT)
             const command = String.fromCharCode(rawData[0]);
-        
-            // '0' = OUTPUT (Terminal data)
             if (command === '0') {
                 const data = rawData.subarray(1);
                 term.write(data);
-            } 
-            // Ignore '1' (SET_WINDOW_TITLE), '2' (SET_PREFERENCES), etc.
+            }
         };
 
         socket.onclose = () => {
@@ -115,10 +115,19 @@ function connectWebSocket(url) {
     }
 }
 
+// Sends resizing payloads formatted for ttyd
 function sendWindowSize() {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    const dimensions = JSON.stringify({ columns: term.cols, rows: term.rows });
-    // '1' = RESIZE command in ttyd protocol
+    
+    // Ensure fitAddon measures accurate character geometry
+    fitAddon.fit();
+
+    const dimensions = JSON.stringify({ 
+        columns: term.cols, 
+        rows: term.rows 
+    });
+    
+    // Command byte '1' sends window dimension payload to ttyd pty
     socket.send('1' + dimensions);
 }
 
