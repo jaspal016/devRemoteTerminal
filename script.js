@@ -35,11 +35,11 @@ function initTerminal() {
     term.writeln('\x1b[1;32m=== TERMUX CLOUDFLARE BRIDGE ===\x1b[0m');
     term.writeln('Click "Connect Live Shell" to decrypt your tunnel link and connect.\r\n');
 
-    // Transmit keypresses back over WebSocket to ttyd stream (Prefix byte '0')
+    // Send keystrokes to ttyd using binary format with command prefix '0'
     term.onData(data => {
         if (socket && socket.readyState === WebSocket.OPEN) {
             const payload = new Uint8Array(data.length + 1);
-            payload[0] = '0'.charCodeAt(0);
+            payload[0] = '0'.charCodeAt(0); // '0' = INPUT command
             for (let i = 0; i < data.length; i++) {
                 payload[i + 1] = data.charCodeAt(i);
             }
@@ -69,18 +69,34 @@ function connectWebSocket(url) {
         socket.onopen = () => {
             statusText.innerText = "CONNECTED";
             term.clear();
-            term.writeln('\x1b[1;32m[+] Connected to live Cloudflare Tunnel stream.\x1b[0m\r\n');
+
+            // 1. Send ttyd initial Auth handshake
+            socket.send(JSON.stringify({ AuthToken: "" }));
+
+            // 2. Send initial window resize to trigger prompt rendering
             sendWindowSize();
         };
 
         socket.onmessage = (event) => {
+            let rawData;
             if (event.data instanceof ArrayBuffer) {
-                const view = new Uint8Array(event.data);
-                if (view.length === 0) return;
-                
-                // Strip ttyd command prefix byte ('0')
-                const data = view.subarray(1);
+                rawData = new Uint8Array(event.data);
+            } else if (typeof event.data === 'string') {
+                rawData = encoder.encode(event.data);
+            } else {
+                return;
+            }
+
+            if (rawData.length === 0) return;
+
+            // Strip ttyd command prefix byte ('0' for OUTPUT)
+            const command = String.fromCharCode(rawData[0]);
+            if (command === '0') {
+                const data = rawData.subarray(1);
                 term.write(data);
+            } else {
+                // If ttyd sends un-prefixed raw terminal data
+                term.write(rawData);
             }
         };
 
@@ -100,8 +116,10 @@ function connectWebSocket(url) {
 }
 
 function sendWindowSize() {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
     const dimensions = JSON.stringify({ columns: term.cols, rows: term.rows });
-    socket.send(encoder.encode('1' + dimensions));
+    // '1' = RESIZE command in ttyd protocol
+    socket.send('1' + dimensions);
 }
 
 function sendRawData(data) {
@@ -165,7 +183,6 @@ async function handleDecryptSubmit(event) {
     try {
         if (submitBtn) submitBtn.disabled = true;
         
-        // Call decryption function from tunnel.js
         const decryptedUrl = await decryptEndpoint(password, HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD);
         
         if (errorMsg) errorMsg.classList.add('hidden');
