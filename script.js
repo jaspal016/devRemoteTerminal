@@ -69,15 +69,16 @@ function connectWebSocket(url) {
         socket.onopen = () => {
             statusText.innerText = "CONNECTED";
             term.clear();
-
-            // 1. Send ttyd initial Auth handshake
+        
             socket.send(JSON.stringify({ AuthToken: "" }));
-
-            // 2. Force fitAddon to re-calculate current container pixel size
-            fitAddon.fit();
-
-            // 3. Send initial window dimensions to align Termux pty buffer with xterm.js
+        
+            // Send initial size immediately
             sendWindowSize();
+        
+            // Re-send size after DOM layout stabilizes
+            setTimeout(() => {
+                sendWindowSize();
+            }, 150);
         };
 
         socket.onmessage = (event) => {
