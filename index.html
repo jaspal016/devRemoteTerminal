@@ -81,7 +81,7 @@
       display: none;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    /* Simple DOM Terminal Stream Container */
+    /* DOM Terminal Stream Container */
     #terminal {
       flex: 1;
       padding: 12px;
@@ -116,7 +116,7 @@
       <h2>Encrypted Terminal Endpoint</h2>
       <input type="password" id="passphrase" placeholder="Enter password to unlock" autofocus />
       <button onclick="unlockAndConnect()">Decrypt & Connect</button>
-      <div id="auth-error">Invalid password or payload corrupted.</div>
+      <div id="auth-error">Invalid password or decryption failed.</div>
     </div>
   </div>
 
@@ -127,7 +127,7 @@
   </div>
 
   <script>
-    // Base64-encoded encrypted payload (Salt + IV + Ciphertext)
+    // Replace with your Base64 payload (Salt[16] + IV[12] + Ciphertext)
     const ENCRYPTED_PAYLOAD = "XBiuI6KfEjchMlmRzVGDww==:uz2WFKtGaQwwBMi+:XH8+UCc4qfFzXC20fCJL/VboSuCA6dsCKBDWFZk8M8ChoBOWW+EjpCo=";
 
     let socket = null;
@@ -135,12 +135,24 @@
     const inputContainer = document.getElementById('input-line');
     const commandInput = document.getElementById('command-input');
 
+    // Safe Base64 to Uint8Array converter
+    function base64ToBytes(base64) {
+      const binString = atob(base64.trim());
+      return Uint8Array.from(binString, (m) => m.codePointAt(0));
+    }
+
     // Decrypt encrypted WebSocket string using Web Crypto API
     async function decryptEndpoint(passphrase, base64Data) {
-      const encryptedBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-      const salt = encryptedBytes.slice(0, 16);
-      const iv = encryptedBytes.slice(16, 28);
-      const ciphertext = encryptedBytes.slice(28);
+      const encryptedBytes = base64ToBytes(base64Data);
+
+      if (encryptedBytes.length < 28) {
+        throw new Error("Payload too short. Expected Salt (16) + IV (12) + Ciphertext.");
+      }
+
+      // Exact slice offsets
+      const salt = encryptedBytes.subarray(0, 16);
+      const iv = encryptedBytes.subarray(16, 28);
+      const ciphertext = encryptedBytes.subarray(28);
 
       const encoder = new TextEncoder();
       const keyMaterial = await crypto.subtle.importKey(
@@ -184,11 +196,12 @@
         inputContainer.style.display = 'flex';
         initWebSocket(wsUrl);
       } catch (e) {
+        console.error("Decryption Error:", e);
+        errorEl.innerText = e.message || "Invalid password or payload corrupted.";
         errorEl.style.display = 'block';
       }
     }
 
-    // Helper regex to strip ANSI escape sequences like [?2004h, [0;32m, etc.
     function stripAnsiCodes(str) {
       return str.replace(/[\u001b\u009b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
     }
@@ -214,7 +227,6 @@
         console.error('WebSocket Error:', err);
       };
 
-      // Send keystroke/command input back to server
       commandInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           const val = commandInput.value + '\n';
@@ -231,7 +243,6 @@
       terminalEl.scrollTop = terminalEl.scrollHeight;
     }
 
-    // Bind Enter key on password input
     document.getElementById('passphrase').addEventListener('keypress', function (e) {
       if (e.key === 'Enter') {
         unlockAndConnect();
