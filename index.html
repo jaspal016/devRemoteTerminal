@@ -3,11 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Terminal Access</title>
-  
-  <!-- xterm.js Stylesheet -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-
+  <title>Terminal Stream</title>
   <style>
     * {
       box-sizing: border-box;
@@ -16,8 +12,8 @@
     }
     body {
       background-color: #0d1117;
-      color: #c9d1d9;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #00ff66;
+      font-family: 'Courier New', Courier, monospace;
       height: 100vh;
       display: flex;
       flex-direction: column;
@@ -48,6 +44,7 @@
       font-size: 1.1rem;
       margin-bottom: 16px;
       color: #58a6ff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .auth-card input {
       width: 100%;
@@ -72,6 +69,7 @@
       color: #fff;
       font-weight: 600;
       cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .auth-card button:hover {
       background: #2ea043;
@@ -81,13 +79,32 @@
       font-size: 0.8rem;
       margin-top: 10px;
       display: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    /* Terminal Container */
-    #terminal-container {
-      width: 100vw;
-      height: 100vh;
-      background: #0d1117;
-      padding: 4px;
+    /* Simple DOM Terminal Stream Container */
+    #terminal {
+      flex: 1;
+      padding: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      overflow-y: auto;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    #input-line {
+      display: flex;
+      padding: 8px 12px;
+      background: #161b22;
+      border-top: 1px solid #30363d;
+    }
+    #input-line input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: #00ff66;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 14px;
+      outline: none;
     }
   </style>
 </head>
@@ -103,27 +120,24 @@
     </div>
   </div>
 
-  <!-- Terminal Screen -->
-  <div id="terminal-container"></div>
-
-  <!-- xterm.js Core & Addons -->
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <!-- Terminal Display -->
+  <div id="terminal"></div>
+  <div id="input-line" style="display: none;">
+    <input type="text" id="command-input" placeholder="Type a command..." autocomplete="off" />
+  </div>
 
   <script>
-    // HARDCODED ENCRYPTED PAYLOAD (Generated via PBKDF2 + AES-GCM)
-    // Format: Base64 string containing Salt + IV + Ciphertext
-    const ENCRYPTED_PAYLOAD = "XBiuI6KfEjchMlmRzVGDww==:uz2WFKtGaQwwBMi+:XH8+UCc4qfFzXC20fCJL/VboSuCA6dsCKBDWFZk8M8ChoBOWW+EjpCo=";
+    // Base64-encoded encrypted payload (Salt + IV + Ciphertext)
+    const ENCRYPTED_PAYLOAD = "REPLACE_WITH_YOUR_BASE64_ENCRYPTED_ENDPOINT_STRING";
 
     let socket = null;
-    let term = null;
-    let fitAddon = null;
+    const terminalEl = document.getElementById('terminal');
+    const inputContainer = document.getElementById('input-line');
+    const commandInput = document.getElementById('command-input');
 
-    // Web Crypto API Decryption Helper (PBKDF2 + AES-GCM)
+    // Decrypt encrypted WebSocket string using Web Crypto API
     async function decryptEndpoint(passphrase, base64Data) {
       const encryptedBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-      
-      // Extract Salt (16 bytes), IV (12 bytes), Ciphertext
       const salt = encryptedBytes.slice(0, 16);
       const iv = encryptedBytes.slice(16, 28);
       const ciphertext = encryptedBytes.slice(28);
@@ -167,77 +181,57 @@
       try {
         const wsUrl = await decryptEndpoint(password, ENCRYPTED_PAYLOAD);
         document.getElementById('auth-overlay').style.display = 'none';
-        initTerminal(wsUrl);
+        inputContainer.style.display = 'flex';
+        initWebSocket(wsUrl);
       } catch (e) {
         errorEl.style.display = 'block';
       }
     }
 
-    function initTerminal(wsUrl) {
-      // 1. Setup xterm instance
-      term = new Terminal({
-        cursorBlink: true,
-        convertEol: true,
-        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        fontSize: 14,
-        theme: {
-          background: '#0d1117',
-          foreground: '#c9d1d9'
-        }
-      });
+    // Helper regex to strip ANSI escape sequences like [?2004h, [0;32m, etc.
+    function stripAnsiCodes(str) {
+      return str.replace(/[\u001b\u009b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+    }
 
-      fitAddon = new FitAddon.FitAddon();
-      term.loadAddon(fitAddon);
-
-      const container = document.getElementById('terminal-container');
-      term.open(container);
-
-      // 2. Open WebSocket Stream
+    function initWebSocket(wsUrl) {
       socket = new WebSocket(wsUrl);
 
-      function sendResizePayload() {
-        fitAddon.fit();
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({
-            type: 'resize',
-            cols: term.cols,
-            rows: term.rows
-          }));
-        }
-      }
-
       socket.onopen = () => {
-        sendResizePayload();
+        appendLog('\n--- Connected to stream ---\n');
+        commandInput.focus();
       };
 
-      // Direct raw binary stream write to handle escape codes
       socket.onmessage = (event) => {
-        term.write(event.data);
+        const cleanData = stripAnsiCodes(event.data);
+        appendLog(cleanData);
       };
 
       socket.onclose = () => {
-        term.write('\r\n\x1b[31m[Connection closed]\x1b[0m\r\n');
+        appendLog('\n--- [Connection closed] ---\n');
       };
 
       socket.onerror = (err) => {
         console.error('WebSocket Error:', err);
       };
 
-      // Stream user keypresses without local echo
-      term.onData((data) => {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send(data);
+      // Send keystroke/command input back to server
+      commandInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const val = commandInput.value + '\n';
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(val);
+          }
+          commandInput.value = '';
         }
       });
-
-      // Keep dimensions in sync with window/container changes
-      const resizeObserver = new ResizeObserver(() => {
-        sendResizePayload();
-      });
-      resizeObserver.observe(container);
     }
 
-    // Allow pressing "Enter" key in the password input
+    function appendLog(text) {
+      terminalEl.textContent += text;
+      terminalEl.scrollTop = terminalEl.scrollHeight;
+    }
+
+    // Bind Enter key on password input
     document.getElementById('passphrase').addEventListener('keypress', function (e) {
       if (e.key === 'Enter') {
         unlockAndConnect();
