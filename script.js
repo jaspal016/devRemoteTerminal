@@ -86,18 +86,18 @@ function connectWebSocket(url) {
             } else {
                 return;
             }
-
+        
             if (rawData.length === 0) return;
-
-            // Strip ttyd command prefix byte ('0' for OUTPUT)
+        
+            // First byte is the ttyd command code
             const command = String.fromCharCode(rawData[0]);
+        
+            // '0' = OUTPUT (Terminal data)
             if (command === '0') {
                 const data = rawData.subarray(1);
                 term.write(data);
-            } else {
-                // If ttyd sends un-prefixed raw terminal data
-                term.write(rawData);
-            }
+            } 
+            // Ignore '1' (SET_WINDOW_TITLE), '2' (SET_PREFERENCES), etc.
         };
 
         socket.onclose = () => {
