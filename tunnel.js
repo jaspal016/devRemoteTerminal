@@ -1,27 +1,45 @@
 // =========================================================================
 // PASTE YOUR GENERATED AES-256 BASE64 PAYLOAD HERE
 // =========================================================================
-let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "XBiuI6KfEjchMlmRzVGDww==:uz2WFKtGaQwwBMi+:XH8+UCc4qfFzXC20fCJL/VboSuCA6dsCKBDWFZk8M8ChoBOWW+EjpCo=";
+let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "1mS0+WBmJSt3qaBWjAbGOJSPvfiTIwkOZRrQQKlIEPlsSeBbQu3I/7o2XkRXoRPvXvoxwGOb555AhUcd/2SPeC6CPnpV";
 
 /**
- * Converts a Base64 string safely to a Uint8Array, handling URL-safe padding.
+ * Converts a Base64 string safely to a Uint8Array.
+ * Handles URL-safe Base64, strips unexpected characters/newlines, and fixes padding.
  */
 function base64ToBytes(base64) {
-    if (typeof base64 !== 'string') {
-        throw new Error("Invalid payload: Data is not a string.");
+    if (typeof base64 !== 'string' || !base64.trim()) {
+        throw new Error("Invalid payload: Base64 string is empty or missing.");
     }
+    
+    // 1. Remove quotes, whitespace, and line breaks
     let cleaned = base64.trim().replace(/[\s"'\r\n]/g, '');
+    
+    // 2. Convert URL-safe Base64 variants back to standard Base64
     cleaned = cleaned.replace(/-/g, '+').replace(/_/g, '/');
+    
+    // 3. Strip any characters that aren't valid Base64 characters
+    cleaned = cleaned.replace(/[^A-Za-z0-9+/=]/g, '');
+
+    // 4. Ensure correct Base64 padding (= or ==)
     const pad = cleaned.length % 4;
     if (pad === 2) cleaned += '==';
     else if (pad === 3) cleaned += '=';
-
-    const binString = atob(cleaned);
-    const bytes = new Uint8Array(binString.length);
-    for (let i = 0; i < binString.length; i++) {
-        bytes[i] = binString.charCodeAt(i);
+    else if (pad === 1) {
+        throw new Error("Base64 string length is invalid (corrupted payload).");
     }
-    return bytes;
+
+    // 5. Safely execute atob
+    try {
+        const binString = atob(cleaned);
+        const bytes = new Uint8Array(binString.length);
+        for (let i = 0; i < binString.length; i++) {
+            bytes[i] = binString.charCodeAt(i);
+        }
+        return bytes;
+    } catch (e) {
+        throw new Error("Failed to decode Base64 string. Please re-generate the payload in Encrypter.");
+    }
 }
 
 /**
