@@ -119,15 +119,18 @@ function connectWebSocket(url) {
 function sendWindowSize() {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     
-    // Ensure fitAddon measures accurate character geometry
+    // Force DOM measurement update
     fitAddon.fit();
 
+    // Prevent sub-pixel row mismatch on the bottom line
+    const rows = Math.max(1, term.rows);
+    const cols = Math.max(1, term.cols);
+
     const dimensions = JSON.stringify({ 
-        columns: term.cols, 
-        rows: term.rows 
+        columns: cols, 
+        rows: rows 
     });
     
-    // Command byte '1' sends window dimension payload to ttyd pty
     socket.send('1' + dimensions);
 }
 
