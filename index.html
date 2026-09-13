@@ -6,43 +6,35 @@
     <title>Termux Remote Terminal & Tunnel Bridge</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    <!-- xterm.js CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
 
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+        
         body {
             font-family: 'Inter', sans-serif;
             background-color: #090d16;
             color: #e2e8f0;
         }
 
-        .font-mono {
-            font-family: 'Fira Code', monospace;
-        }
-
-        .terminal-scroll::-webkit-scrollbar {
-            width: 8px;
-        }
-        .terminal-scroll::-webkit-scrollbar-track {
-            background: #0d1117;
-        }
-        .terminal-scroll::-webkit-scrollbar-thumb {
-            background: #21262d;
-            border-radius: 4px;
-        }
-        .terminal-scroll::-webkit-scrollbar-thumb:hover {
-            background: #30363d;
-        }
-
-        .cursor-blink {
-            animation: blink 1s step-end infinite;
-        }
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0; }
-        }
-
         .terminal-container {
             box-shadow: 0 0 30px rgba(0, 255, 170, 0.05), inset 0 0 15px rgba(0, 0, 0, 0.8);
+        }
+
+        .xterm .xterm-viewport::-webkit-scrollbar {
+            width: 8px;
+        }
+        .xterm .xterm-viewport::-webkit-scrollbar-track {
+            background: #0d1117;
+        }
+        .xterm .xterm-viewport::-webkit-scrollbar-thumb {
+            background: #21262d;
+            border-radius: 4px;
         }
 
         .scanlines {
@@ -50,8 +42,8 @@
                 to bottom,
                 rgba(255,255,255,0),
                 rgba(255,255,255,0) 50%,
-                rgba(0, 0, 0, 0.2) 50%,
-                rgba(0, 0, 0, 0.2)
+                rgba(0, 0, 0, 0.25) 50%,
+                rgba(0, 0, 0, 0.25)
             );
             background-size: 100% 4px;
         }
@@ -59,7 +51,7 @@
 </head>
 <body class="h-screen flex flex-col overflow-hidden bg-[#090d16] text-gray-200">
 
-    <!-- Navigation Header -->
+    <!-- Header Navigation -->
     <header class="bg-[#161b22] border-b border-gray-800 px-4 py-2.5 flex items-center justify-between z-10 select-none">
         <div class="flex items-center space-x-3">
             <div class="flex items-center space-x-2 text-emerald-400 font-bold font-mono text-lg">
@@ -67,174 +59,108 @@
                 <span>TERMUX<span class="text-gray-400 font-normal">::CONNECT</span></span>
             </div>
             <span class="hidden sm:inline-block bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 text-xs px-2 py-0.5 rounded font-mono">
-                v2.4.0-cloudflared
+                v3.0.0-xterm
             </span>
         </div>
 
         <div class="flex items-center space-x-3 text-sm">
-            <div class="hidden md:flex items-center bg-[#0d1117] rounded-lg p-1 border border-gray-800 text-xs">
-                <button id="modeSimBtn" onclick="setMode('sim')" class="px-2.5 py-1 rounded-md font-medium transition text-emerald-400 bg-gray-800">
-                    <i class="fa-solid fa-flask mr-1"></i> Simulator
-                </button>
-                <button id="modeLiveBtn" onclick="requestLiveModeSwitch()" class="px-2.5 py-1 rounded-md font-medium transition text-gray-400 hover:text-gray-200">
-                    <i class="fa-solid fa-lock mr-1"></i> Live Tunnel
-                </button>
-            </div>
-
             <div id="statusBadge" class="flex items-center space-x-2 bg-emerald-950/50 border border-emerald-800/60 text-emerald-400 px-3 py-1 rounded-full text-xs font-mono">
                 <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span id="statusText">SIMULATOR ACTIVE</span>
-                <span id="latencySpan" class="text-gray-400 border-l border-emerald-800/60 pl-2 ml-1 hidden">12ms</span>
+                <span id="statusText">STANDBY</span>
             </div>
 
-            <button onclick="toggleModal('configModal')" class="bg-[#21262d] hover:bg-[#30363d] text-gray-200 px-3 py-1.5 rounded-lg border border-gray-700 transition flex items-center space-x-1.5 text-xs font-medium">
-                <i class="fa-solid fa-gear"></i>
-                <span class="hidden sm:inline">Settings & Encrypter</span>
+            <button onclick="requestLiveModeSwitch()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 text-xs font-medium">
+                <i class="fa-solid fa-key"></i>
+                <span>Connect Live Shell</span>
             </button>
 
-            <button onclick="toggleModal('docsModal')" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 text-xs font-medium">
-                <i class="fa-solid fa-book"></i>
-                <span class="hidden sm:inline">Setup Guide</span>
+            <button onclick="toggleModal('configModal')" class="bg-[#21262d] hover:bg-[#30363d] text-gray-200 px-3 py-1.5 rounded-lg border border-gray-700 transition flex items-center space-x-1.5 text-xs font-medium">
+                <i class="fa-solid fa-lock"></i>
+                <span class="hidden sm:inline">Encrypter</span>
             </button>
         </div>
     </header>
 
-    <!-- Main Content Area -->
+    <!-- Main Workspace -->
     <main class="flex-1 flex flex-col p-2 sm:p-4 overflow-hidden relative">
         <div class="flex-1 bg-[#0d1117] border border-gray-800 rounded-xl flex flex-col overflow-hidden terminal-container relative">
             
             <div class="bg-[#161b22] px-4 py-2 border-b border-gray-800/80 flex items-center justify-between text-xs text-gray-400 font-mono select-none">
                 <div class="flex items-center space-x-2">
-                    <span class="w-3 h-3 rounded-full bg-red-500/80 inline-block"></span>
-                    <span class="w-3 h-3 rounded-full bg-yellow-500/80 inline-block"></span>
-                    <span class="w-3 h-3 rounded-full bg-green-500/80 inline-block"></span>
+                    <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
+                    <span class="w-3 h-3 rounded-full bg-yellow-500/80"></span>
+                    <span class="w-3 h-3 rounded-full bg-green-500/80"></span>
                     <span class="ml-2 font-semibold text-gray-300 flex items-center gap-1.5">
                         <i class="fa-brands fa-android text-emerald-400"></i>
-                        <span id="termTitle">termux@android:~ (tty1)</span>
+                        <span>termux@android:~ (tty1)</span>
                     </span>
                 </div>
                 <div class="flex items-center space-x-3">
-                    <button onclick="clearTerminal()" class="hover:text-emerald-400 transition" title="Clear Screen">
+                    <button onclick="clearTerminal()" class="hover:text-emerald-400 transition">
                         <i class="fa-solid fa-eraser"></i> Clear
                     </button>
-                    <button onclick="toggleScanlines()" class="hover:text-emerald-400 transition" title="Toggle CRT Scanlines">
+                    <button onclick="toggleScanlines()" class="hover:text-emerald-400 transition">
                         <i class="fa-solid fa-tv"></i> CRT
                     </button>
-                    <button onclick="fitTerminal()" class="hover:text-emerald-400 transition" title="Focus Prompt">
-                        <i class="fa-solid fa-expand"></i>
-                    </button>
                 </div>
             </div>
 
-            <!-- Terminal Screen -->
-            <div id="terminalScreen" onclick="focusPrompt()" class="flex-1 p-4 font-mono text-sm overflow-y-auto terminal-scroll leading-relaxed relative">
-                <div id="scanlinesOverlay" class="scanlines absolute inset-0 pointer-events-none opacity-30"></div>
-                
-                <div id="welcomeBanner" class="mb-4 text-gray-400">
-                    <pre class="text-emerald-400 font-bold hidden sm:block text-xs leading-none mb-2">
-  _____                                      _____                      _ 
- |_   _|__ _ __ _ __ ___  _   ___  __       |  ___|__  _ __  ___  _   _| |
-   | |/ _ \ '__| '_ ` _ \| | | \ \/ /  ___  | |_ / _ \| '__|/ _ \| | | | |
-   | |  __/ |  | | | | | | |_| |>  <  |___| |  _| (_) | |  | (_) | |_| |_|
-   |_|\___|_|  |_| |_| |_|\__,_/_/\_\       |_|  \___/|_|   \___/ \__, (_)
-                                                                  |___/   
-                    </pre>
-                    <p class="text-emerald-400 font-semibold sm:hidden mb-1">=== TERMUX REMOTE CONSOLE ===</p>
-                    <p class="text-xs text-gray-400">Welcome to Termux Web Shell Interface.</p>
-                    <p class="text-xs text-gray-400">Type <span class="text-yellow-400 font-semibold">help</span> to view simulated commands or connect your live phone via <span class="text-emerald-400">Settings</span>.</p>
-                    <div class="mt-2 text-xs border-l-2 border-emerald-500/50 pl-2 text-gray-400 space-y-0.5">
-                        <p>Architecture: <span class="text-gray-200">aarch64 (Android 14)</span> | Shell: <span class="text-gray-200">bash 5.2.21</span></p>
-                        <p>Connection: <span id="bannerConnType" class="text-emerald-400 font-medium">Local Emulation Engine</span></p>
-                    </div>
-                </div>
-
-                <div id="outputBuffer" class="space-y-1"></div>
-
-                <div class="flex items-center mt-2 flex-wrap" id="promptRow">
-                    <span id="promptLabel" class="text-emerald-400 font-semibold mr-2 select-none">termux@android:~$</span>
-                    <div class="relative flex-1 flex items-center min-w-[200px]">
-                        <input type="text" id="cmdInput" 
-                            class="w-full bg-transparent text-gray-100 border-none outline-none font-mono text-sm p-0 m-0 focus:ring-0"
-                            autocomplete="off" spellcheck="false" autofocus />
-                    </div>
-                </div>
+            <!-- Terminal Window -->
+            <div class="flex-1 relative p-2 bg-[#0d1117]">
+                <div id="scanlinesOverlay" class="scanlines absolute inset-0 pointer-events-none opacity-30 z-10"></div>
+                <div id="terminal" class="h-full w-full"></div>
             </div>
 
-            <!-- Quick Keys -->
+            <!-- Quick Action Bar -->
             <div class="bg-[#161b22] border-t border-gray-800 p-1.5 flex items-center space-x-1 overflow-x-auto text-xs font-mono select-none">
-                <span class="text-gray-400 px-2 text-[10px] uppercase tracking-wider font-semibold">Quick:</span>
-                <button onclick="sendQuickCmd('pkg update && pkg upgrade -y')" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">pkg update</button>
-                <button onclick="sendQuickCmd('termux-battery-status')" class="bg-[#21262d] hover:bg-gray-700 text-emerald-400 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">battery-status</button>
-                <button onclick="sendQuickCmd('htop')" class="bg-[#21262d] hover:bg-gray-700 text-cyan-400 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">htop</button>
-                <button onclick="sendQuickCmd('ls -la')" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">ls -la</button>
-                <button onclick="sendQuickCmd('clear')" class="bg-[#21262d] hover:bg-gray-700 text-yellow-400 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">clear</button>
-                <button onclick="triggerKeyUp()" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-700"><i class="fa-solid fa-arrow-up"></i></button>
-                <button onclick="triggerKeyDown()" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-700"><i class="fa-solid fa-arrow-down"></i></button>
+                <span class="text-gray-400 px-2 text-[10px] uppercase font-semibold">Quick:</span>
+                <button onclick="sendRawData('pkg update && pkg upgrade -y\r')" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2.5 py-1 rounded border border-gray-700">pkg update</button>
+                <button onclick="sendRawData('termux-battery-status\r')" class="bg-[#21262d] hover:bg-gray-700 text-emerald-400 px-2.5 py-1 rounded border border-gray-700">battery-status</button>
+                <button onclick="sendRawData('htop\r')" class="bg-[#21262d] hover:bg-gray-700 text-cyan-400 px-2.5 py-1 rounded border border-gray-700">htop</button>
+                <button onclick="sendRawData('ls -la\r')" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2.5 py-1 rounded border border-gray-700">ls -la</button>
+                <button onclick="sendRawData('\x03')" class="bg-[#21262d] hover:bg-gray-700 text-red-400 px-2.5 py-1 rounded border border-gray-700 font-bold">Ctrl+C</button>
             </div>
         </div>
     </main>
 
-    <!-- Settings / Tunnel Config Modal -->
+    <!-- Encryption Helper Modal -->
     <div id="configModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
         <div class="bg-[#161b22] border border-gray-800 rounded-xl w-full max-w-lg overflow-hidden shadow-2xl">
             <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
-                <h3 class="font-bold text-gray-100 flex items-center gap-2">
-                    <i class="fa-solid fa-sliders text-emerald-400"></i> Tunnel & Encryption Settings
+                <h3 class="font-bold text-gray-100 flex items-center gap-2 text-sm">
+                    <i class="fa-solid fa-shield-halved text-emerald-400"></i> Cloudflare Tunnel Payload Encrypter
                 </h3>
                 <button onclick="toggleModal('configModal')" class="text-gray-400 hover:text-white">
                     <i class="fa-solid fa-xmark text-lg"></i>
                 </button>
             </div>
             
-            <div class="p-5 space-y-4 text-sm max-h-[75vh] overflow-y-auto terminal-scroll">
+            <div class="p-5 space-y-4 text-sm max-h-[75vh] overflow-y-auto">
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Execution Mode</label>
-                    <div class="grid grid-cols-2 gap-2">
-                        <button id="modalSimBtn" onclick="setMode('sim')" class="p-3 border rounded-lg text-left flex flex-col justify-between transition border-emerald-500 bg-emerald-950/20">
-                            <span class="font-bold text-emerald-400"><i class="fa-solid fa-flask mr-1"></i> Simulator Mode</span>
-                            <span class="text-xs text-gray-400 mt-1">Interactive built-in shell with mock Termux APIs.</span>
-                        </button>
-                        <button id="modalLiveBtn" onclick="requestLiveModeSwitch()" class="p-3 border border-gray-700 rounded-lg text-left flex flex-col justify-between hover:border-gray-600 transition">
-                            <span class="font-bold text-gray-300"><i class="fa-solid fa-key mr-1"></i> Live Tunnel</span>
-                            <span class="text-xs text-gray-400 mt-1">Decrypt hardcoded payload & connect WebSocket.</span>
-                        </button>
-                    </div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">WebSocket URL / Tunnel String</label>
+                    <input type="text" id="encUrlInput" placeholder="wss://your-subdomain.trycloudflare.com/ws" 
+                        class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
                 </div>
 
-                <div class="border-t border-gray-800 pt-4 space-y-3">
-                    <div class="flex items-center justify-between">
-                        <h4 class="font-bold text-xs uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                            <i class="fa-solid fa-shield-halved"></i> Cloudflare Config Encrypter
-                        </h4>
-                        <span class="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded">AES-256-GCM</span>
-                    </div>
-                    
-                    <div>
-                        <label class="block text-xs font-medium text-gray-300 mb-1">WebSocket URL / Tunnel String</label>
-                        <input type="text" id="encUrlInput" value="wss://subd.domain.com/ws" 
-                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
-                    </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">Encryption Secret Password</label>
+                    <input type="password" id="encPassInput" placeholder="Enter password to lock payload" 
+                        class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
+                </div>
 
-                    <div>
-                        <label class="block text-xs font-medium text-gray-300 mb-1">Encryption Secret Password</label>
-                        <input type="password" id="encPassInput" placeholder="Enter password to lock payload" 
-                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
-                    </div>
+                <button onclick="generateEncryptedPayload()" class="w-full py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-lock"></i> Encrypt Payload
+                </button>
 
-                    <button onclick="generateEncryptedPayload()" class="w-full py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg transition flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-lock"></i> Encrypt Payload
-                    </button>
-
-                    <div id="encResultContainer" class="hidden space-y-1">
-                        <label class="block text-xs font-medium text-emerald-400">Encrypted Payload (Base64):</label>
-                        <div class="relative">
-                            <textarea id="encResultText" readonly class="w-full h-20 bg-[#0d1117] border border-gray-700 rounded-lg p-2 text-[11px] font-mono text-gray-300 resize-none focus:outline-none"></textarea>
-                            <button onclick="copyEncryptedPayload()" class="absolute top-2 right-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-[10px] px-2 py-1 rounded border border-gray-600">
-                                <i class="fa-solid fa-copy mr-1"></i> Copy
-                            </button>
-                        </div>
-                        <p class="text-[10px] text-gray-500">Paste this string into <code class="text-emerald-400">HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD</code> in your JavaScript.</p>
+                <div id="encResultContainer" class="hidden space-y-1">
+                    <label class="block text-xs font-medium text-emerald-400">Encrypted Payload (Base64):</label>
+                    <div class="relative">
+                        <textarea id="encResultText" readonly class="w-full h-20 bg-[#0d1117] border border-gray-700 rounded-lg p-2 text-[11px] font-mono text-gray-300 resize-none focus:outline-none"></textarea>
+                        <button onclick="copyEncryptedPayload()" class="absolute top-2 right-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-[10px] px-2 py-1 rounded border border-gray-600">
+                            <i class="fa-solid fa-copy mr-1"></i> Copy
+                        </button>
                     </div>
+                    <p class="text-[10px] text-gray-500">Paste this string into <code class="text-emerald-400">HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD</code> in the JavaScript below.</p>
                 </div>
             </div>
 
@@ -258,18 +184,18 @@
             
             <form onsubmit="handleDecryptSubmit(event)" class="p-5 space-y-4 text-sm">
                 <p class="text-xs text-gray-300 leading-relaxed">
-                    Enter your password to unlock the hardcoded tunnel payload.
+                    Enter your secret password to unlock the encrypted Cloudflare payload and connect.
                 </p>
 
                 <div>
                     <label class="block text-xs font-medium text-gray-300 mb-1">Decryption Password</label>
-                    <input type="password" id="decryptPassInput" placeholder="Enter secret password" autofocus required
+                    <input type="password" id="decryptPassInput" placeholder="Enter password" autofocus required
                         class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
                 </div>
 
                 <div id="decryptErrorMsg" class="hidden text-xs text-red-400 bg-red-950/40 border border-red-800/60 p-2.5 rounded-lg flex items-center gap-2">
                     <i class="fa-solid fa-triangle-exclamation"></i>
-                    <span>Invalid password or decryption failed.</span>
+                    <span>Invalid password or payload corrupted.</span>
                 </div>
 
                 <div class="flex justify-end space-x-2 pt-2">
@@ -283,70 +209,20 @@
         </div>
     </div>
 
-    <!-- Documentation Modal -->
-    <div id="docsModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
-        <div class="bg-[#161b22] border border-gray-800 rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
-            <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
-                <h3 class="font-bold text-gray-100 flex items-center gap-2">
-                    <i class="fa-solid fa-book-bookmark text-emerald-400"></i> Setup Guide
-                </h3>
-                <button onclick="toggleModal('docsModal')" class="text-gray-400 hover:text-white">
-                    <i class="fa-solid fa-xmark text-lg"></i>
-                </button>
-            </div>
-            
-            <div class="p-5 overflow-y-auto space-y-4 text-xs leading-relaxed terminal-scroll">
-                <div class="bg-emerald-950/40 border border-emerald-800/60 p-3 rounded-lg text-emerald-300">
-                    <p class="font-semibold mb-1"><i class="fa-solid fa-circle-info mr-1"></i> How to host & connect:</p>
-                    <p class="text-gray-300">Run <code class="text-emerald-400 font-mono">ttyd</code> in Termux and expose it with <code class="text-emerald-400 font-mono">cloudflared</code>.</p>
-                </div>
-            </div>
-
-            <div class="px-5 py-3 bg-[#0d1117] border-t border-gray-800 flex justify-end">
-                <button onclick="toggleModal('docsModal')" class="px-4 py-1.5 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg transition">Got it</button>
-            </div>
-        </div>
-    </div>
-
     <script>
+        // =========================================================================
+        // PASTE YOUR GENERATED AES-256 BASE64 PAYLOAD HERE
+        // =========================================================================
         let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "XBiuI6KfEjchMlmRzVGDww==:uz2WFKtGaQwwBMi+:XH8+UCc4qfFzXC20fCJL/VboSuCA6dsCKBDWFZk8M8ChoBOWW+EjpCo=";
 
-        let appState = {
-            mode: 'sim',
-            wsEndpoint: '',
-            promptPrefix: 'termux@android:~$',
-            cmdHistory: [],
-            historyIndex: -1,
-            socket: null,
-            connected: true,
-            currentDir: '~'
-        };
-
+        let term;
+        let fitAddon;
+        let socket = null;
         const encoder = new TextEncoder();
 
-        const cmdInput = document.getElementById('cmdInput');
-        const outputBuffer = document.getElementById('outputBuffer');
-        const terminalScreen = document.getElementById('terminalScreen');
-        const promptLabel = document.getElementById('promptLabel');
-        const statusBadge = document.getElementById('statusBadge');
-        const statusText = document.getElementById('statusText');
-        const latencySpan = document.getElementById('latencySpan');
-        const bannerConnType = document.getElementById('bannerConnType');
-
+        // --- Crypto Helpers ---
         function base64ToBytes(base64) {
             let cleaned = base64.trim().replace(/[\s"'\r\n]/g, '');
-            if (cleaned.includes(':')) {
-                const parts = cleaned.split(':');
-                const salt = base64ToBytes(parts[0]);
-                const iv = base64ToBytes(parts[1]);
-                const cipher = base64ToBytes(parts[2]);
-                const combined = new Uint8Array(salt.length + iv.length + cipher.length);
-                combined.set(salt, 0);
-                combined.set(iv, salt.length);
-                combined.set(cipher, salt.length + iv.length);
-                return combined;
-            }
-
             cleaned = cleaned.replace(/-/g, '+').replace(/_/g, '/');
             const pad = cleaned.length % 4;
             if (pad === 2) cleaned += '==';
@@ -457,26 +333,14 @@
             alert("Encrypted payload copied to clipboard!");
         }
 
-        function toggleModal(id, forceState = null) {
-            const modal = document.getElementById(id);
-            if (!modal) return;
-            if (forceState !== null) {
-                if (forceState) modal.classList.remove('hidden');
-                else modal.classList.add('hidden');
-            } else {
-                modal.classList.toggle('hidden');
-            }
-        }
-
+        // --- Auth UI & Tunnel Handlers ---
         function requestLiveModeSwitch() {
             const errorMsg = document.getElementById('decryptErrorMsg');
             const passInput = document.getElementById('decryptPassInput');
             if (errorMsg) errorMsg.classList.add('hidden');
             if (passInput) passInput.value = '';
             toggleModal('decryptModal', true);
-            setTimeout(() => {
-                if (passInput) passInput.focus();
-            }, 100);
+            setTimeout(() => { if (passInput) passInput.focus(); }, 100);
         }
 
         async function handleDecryptSubmit(event) {
@@ -495,16 +359,14 @@
                 if (errorMsg) errorMsg.classList.add('hidden');
                 toggleModal('decryptModal', false);
                 
-                setMode('live');
-                appState.wsEndpoint = decryptedUrl;
-                connectLiveWebSocket(decryptedUrl);
+                connectWebSocket(decryptedUrl);
             } catch (err) {
                 console.error("Decryption failed:", err);
                 if (errorMsg) {
                     errorMsg.classList.remove('hidden');
                     const errTextSpan = errorMsg.querySelector('span');
                     if (errTextSpan) {
-                        errTextSpan.innerText = err.message || "Invalid password or payload corrupted.";
+                        errTextSpan.innerText = err.message || "Invalid password or corrupted payload.";
                     }
                 }
             } finally {
@@ -512,242 +374,134 @@
             }
         }
 
-        function triggerKeyUp() {
-            if (appState.cmdHistory.length === 0) return;
-            if (appState.historyIndex > 0) {
-                appState.historyIndex--;
-            } else if (appState.historyIndex === -1) {
-                appState.historyIndex = appState.cmdHistory.length - 1;
-            }
-            if (cmdInput) {
-                cmdInput.value = appState.cmdHistory[appState.historyIndex] || '';
-            }
-        }
-
-        function triggerKeyDown() {
-            if (appState.cmdHistory.length > 0 && appState.historyIndex < appState.cmdHistory.length - 1) {
-                appState.historyIndex++;
-                cmdInput.value = appState.cmdHistory[appState.historyIndex];
-            } else {
-                appState.historyIndex = appState.cmdHistory.length;
-                cmdInput.value = '';
-            }
-        }
-
-        function focusPrompt() {
-            cmdInput.focus();
-        }
-
-        function sendQuickCmd(cmd) {
-            cmdInput.value = cmd;
-            cmdInput.focus();
-        }
-
-        function executeCommand(rawCmd) {
-            if (appState.mode === 'sim') {
-                appendPromptLine(rawCmd);
-                const parts = rawCmd.trim().split(/\s+/);
-                const mainCmd = parts[0].toLowerCase();
-                const args = parts.slice(1);
-
-                setTimeout(() => {
-                    handleSimulatedCommand(mainCmd, args, rawCmd);
-                    scrollToBottom();
-                }, 60);
-                return;
-            }
-
-            // Live Mode: Direct pipeline to ttyd WebSocket
-            if (appState.socket && appState.socket.readyState === WebSocket.OPEN) {
-                const payload = encoder.encode('0' + rawCmd + '\r');
-                appState.socket.send(payload);
-            } else {
-                appendOutput(`\n<span class="text-red-400">[!] WebSocket disconnected. Please re-authenticate Live Tunnel.</span>\n`);
-            }
-        }
-
-        function appendPromptLine(cmdText) {
-            const line = document.createElement('div');
-            line.className = 'flex items-start flex-wrap font-mono';
-            line.innerHTML = `<span class="text-emerald-400 font-semibold mr-2">${appState.promptPrefix}</span> <span class="text-gray-100">${escapeHtml(cmdText)}</span>`;
-            outputBuffer.appendChild(line);
-            scrollToBottom();
-        }
-
-        function appendOutput(content, colorClass = 'text-gray-300') {
-            const block = document.createElement('div');
-            block.className = `font-mono text-xs sm:text-sm whitespace-pre-wrap ${colorClass}`;
-            block.innerHTML = content;
-            outputBuffer.appendChild(block);
-            scrollToBottom();
-        }
-
-        function scrollToBottom() {
-            terminalScreen.scrollTop = terminalScreen.scrollHeight;
-        }
-
-        function clearTerminal() {
-            outputBuffer.innerHTML = '';
-            cmdInput.value = '';
-            focusPrompt();
-        }
-
-        function toggleScanlines() {
-            const overlay = document.getElementById('scanlinesOverlay');
-            overlay.classList.toggle('hidden');
-        }
-
-        function fitTerminal() {
-            focusPrompt();
-        }
-
-        function stripAnsiCodes(str) {
-            return str.replace(/[\u001b\u009b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-        }
-
-        function handleSimulatedCommand(cmd, args, fullCmd) {
-            switch (cmd) {
-                case 'help':
-                    appendOutput(
-                        `<span class="text-yellow-400 font-bold">Simulated Termux Shell Commands:</span>\n` +
-                        `  <span class="text-emerald-400">termux-battery-status</span>  - Get phone battery info\n` +
-                        `  <span class="text-emerald-400">pkg / apt [update/install]</span>- Package manager operations\n` +
-                        `  <span class="text-emerald-400">htop, ls, cd, pwd, echo, clear</span>- System utilities`
-                    );
-                    break;
-                case 'termux-battery-status':
-                    appendOutput(`{\n  <span class="text-cyan-400">"percentage"</span>: 88,\n  <span class="text-cyan-400">"status"</span>: <span class="text-green-400">"CHARGING"</span>\n}`);
-                    break;
-                case 'ls':
-                    appendOutput(`<span class="text-blue-400 font-bold">storage</span>  <span class="text-emerald-400 font-bold">scripts</span>  <span class="text-white">downloads</span>`);
-                    break;
-                case 'pwd':
-                    appendOutput(`/data/data/com.termux/files/home`);
-                    break;
-                case 'clear':
-                    clearTerminal();
-                    break;
-                default:
-                    appendOutput(`bash: ${escapeHtml(cmd)}: command not found`, 'text-red-400');
-                    break;
-            }
-        }
-
-        function setMode(mode) {
-            appState.mode = mode;
-            const simBtn = document.getElementById('modeSimBtn');
-            const liveBtn = document.getElementById('modeLiveBtn');
-
-            if (mode === 'sim') {
-                simBtn.className = "px-2.5 py-1 rounded-md font-medium transition text-emerald-400 bg-gray-800";
-                liveBtn.className = "px-2.5 py-1 rounded-md font-medium transition text-gray-400 hover:text-gray-200";
-                statusBadge.className = "flex items-center space-x-2 bg-emerald-950/50 border border-emerald-800/60 text-emerald-400 px-3 py-1 rounded-full text-xs font-mono";
-                statusText.innerText = "SIMULATOR ACTIVE";
-                latencySpan.classList.add('hidden');
-                bannerConnType.innerText = "Local Emulation Engine";
-
-                if (appState.socket) {
-                    appState.socket.close();
-                    appState.socket = null;
+        // --- Terminal Execution & Connection ---
+        function initTerminal() {
+            term = new Terminal({
+                cursorBlink: true,
+                fontFamily: "'Fira Code', monospace",
+                fontSize: 14,
+                theme: {
+                    background: '#0d1117',
+                    foreground: '#e2e8f0',
+                    cursor: '#00ffaa',
+                    selectionBackground: '#21262d',
+                    black: '#0d1117',
+                    red: '#ff5555',
+                    green: '#50fa7b',
+                    yellow: '#f1fa8c',
+                    blue: '#bd93f9',
+                    magenta: '#ff79c6',
+                    cyan: '#8be9fd',
+                    white: '#bfbfbf'
                 }
-            } else {
-                liveBtn.className = "px-2.5 py-1 rounded-md font-medium transition text-emerald-400 bg-gray-800";
-                simBtn.className = "px-2.5 py-1 rounded-md font-medium transition text-gray-400 hover:text-gray-200";
-                statusBadge.className = "flex items-center space-x-2 bg-yellow-950/50 border border-yellow-800/60 text-yellow-400 px-3 py-1 rounded-full text-xs font-mono";
-                statusText.innerText = "DECRYPTED TUNNEL";
-                bannerConnType.innerText = "Cloudflare Tunnel (Decrypted Payload)";
-            }
+            });
+
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.loadAddon(new WebLinksAddon.WebLinksAddon());
+
+            term.open(document.getElementById('terminal'));
+            fitAddon.fit();
+
+            term.writeln('\x1b[1;32m=== TERMUX CLOUDFLARE BRIDGE ===\x1b[0m');
+            term.writeln('Click "Connect Live Shell" to decrypt your tunnel link and connect.\r\n');
+
+            term.onData(data => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    const payload = new Uint8Array(data.length + 1);
+                    payload[0] = '0'.charCodeAt(0);
+                    for (let i = 0; i < data.length; i++) {
+                        payload[i + 1] = data.charCodeAt(i);
+                    }
+                    socket.send(payload.buffer);
+                }
+            });
+
+            window.addEventListener('resize', () => {
+                fitAddon.fit();
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    sendWindowSize();
+                }
+            });
         }
 
-        function connectLiveWebSocket(url) {
-            statusBadge.className = "flex items-center space-x-2 bg-yellow-950/50 border border-yellow-800/60 text-yellow-400 px-3 py-1 rounded-full text-xs font-mono";
+        function connectWebSocket(url) {
+            const statusText = document.getElementById('statusText');
             statusText.innerText = "CONNECTING...";
 
+            if (socket) socket.close();
+
             try {
-                appState.socket = new WebSocket(url, 'tty');
-                appState.socket.binaryType = 'arraybuffer';
+                socket = new WebSocket(url, 'tty');
+                socket.binaryType = 'arraybuffer';
 
-                appState.socket.onopen = function() {
-                    statusBadge.className = "flex items-center space-x-2 bg-emerald-950/50 border border-emerald-800/60 text-emerald-400 px-3 py-1 rounded-full text-xs font-mono";
-                    statusText.innerText = "CONNECTED TUNNEL";
-                    latencySpan.classList.remove('hidden');
-                    latencySpan.innerText = "42ms";
-                    appendOutput(`\n<span class="text-emerald-400 font-bold">[+] Connected to live Cloudflare Tunnel stream</span>\n`);
-
-                    const handshake = JSON.stringify({ AuthToken: "", columns: 80, rows: 24 });
-                    appState.socket.send(encoder.encode(handshake));
-                    appState.socket.send(encoder.encode('1' + JSON.stringify({ columns: 80, rows: 24 })));
+                socket.onopen = () => {
+                    statusText.innerText = "CONNECTED";
+                    term.clear();
+                    term.writeln('\x1b[1;32m[+] Connected to live Cloudflare Tunnel stream.\x1b[0m\r\n');
+                    sendWindowSize();
                 };
 
-                appState.socket.onmessage = function(event) {
-                    let text = "";
+                socket.onmessage = (event) => {
                     if (event.data instanceof ArrayBuffer) {
                         const view = new Uint8Array(event.data);
                         if (view.length === 0) return;
-                        const cmdByte = String.fromCharCode(view[0]);
-                        if (cmdByte === '0') {
-                            text = new TextDecoder('utf-8').decode(view.subarray(1));
-                        }
-                    } else if (typeof event.data === 'string') {
-                        text = event.data;
-                    }
-
-                    if (text) {
-                        let cleanText = stripAnsiCodes(text);
-                        // Filter out redundant shell prompt lines (~ $) sent from bash
-                        cleanText = cleanText.replace(/~\s*\$/g, '').replace(/\n\s*\n/g, '\n');
-                        if (cleanText.trim() !== '') {
-                            appendOutput(escapeHtml(cleanText));
-                        }
+                        
+                        // Strip ttyd command prefix byte ('0')
+                        const data = view.subarray(1);
+                        term.write(data);
                     }
                 };
 
-                appState.socket.onerror = function() {
-                    statusBadge.className = "flex items-center space-x-2 bg-red-950/50 border border-red-800/60 text-red-400 px-3 py-1 rounded-full text-xs font-mono";
+                socket.onclose = () => {
                     statusText.innerText = "DISCONNECTED";
+                    term.writeln('\r\n\x1b[1;31m[!] Tunnel Connection closed.\x1b[0m');
                 };
 
-                appState.socket.onclose = function() {
-                    statusBadge.className = "flex items-center space-x-2 bg-red-950/50 border border-red-800/60 text-red-400 px-3 py-1 rounded-full text-xs font-mono";
-                    statusText.innerText = "DISCONNECTED";
+                socket.onerror = (err) => {
+                    statusText.innerText = "ERROR";
+                    term.writeln('\r\n\x1b[1;31m[!] WebSocket Error.\x1b[0m');
                 };
+
             } catch (err) {
-                appendOutput(`\n<span class="text-red-400">[!] WebSocket Error: ${err.message}</span>\n`);
+                term.writeln(`\r\n\x1b[1;31m[!] Failed to connect: ${err.message}\x1b[0m`);
             }
         }
 
-        function escapeHtml(text) {
-            return text
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#039;");
+        function sendWindowSize() {
+            const dimensions = JSON.stringify({ columns: term.cols, rows: term.rows });
+            socket.send(encoder.encode('1' + dimensions));
         }
 
-        window.onload = function() {
-            focusPrompt();
-            if (cmdInput) {
-                cmdInput.addEventListener('keydown', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const rawCmd = cmdInput.value;
-                        if (rawCmd.trim()) {
-                            appState.cmdHistory.push(rawCmd);
-                            appState.historyIndex = appState.cmdHistory.length;
-                        }
-                        executeCommand(rawCmd);
-                        cmdInput.value = '';
-                    } else if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        triggerKeyUp();
-                    } else if (e.key === 'ArrowDown') {
-                        e.preventDefault();
-                        triggerKeyDown();
-                    }
-                });
+        function sendRawData(data) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const payload = new Uint8Array(data.length + 1);
+                payload[0] = '0'.charCodeAt(0);
+                for (let i = 0; i < data.length; i++) {
+                    payload[i + 1] = data.charCodeAt(i);
+                }
+                socket.send(payload.buffer);
             }
-        };
+        }
+
+        function clearTerminal() {
+            term.clear();
+        }
+
+        function toggleScanlines() {
+            document.getElementById('scanlinesOverlay').classList.toggle('hidden');
+        }
+
+        function toggleModal(id, force) {
+            const modal = document.getElementById(id);
+            if (force !== undefined) {
+                modal.classList.toggle('hidden', !force);
+            } else {
+                modal.classList.toggle('hidden');
+            }
+        }
+
+        window.onload = initTerminal;
     </script>
 </body>
 </html>
