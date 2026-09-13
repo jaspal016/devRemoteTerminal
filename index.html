@@ -309,7 +309,6 @@
     </div>
 
     <script>
-        // HARDCODED ENCRYPTED PAYLOAD (Base64 Salt + IV + Ciphertext OR Colon Separated)
         let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "XBiuI6KfEjchMlmRzVGDww==:uz2WFKtGaQwwBMi+:XH8+UCc4qfFzXC20fCJL/VboSuCA6dsCKBDWFZk8M8ChoBOWW+EjpCo=";
 
         let appState = {
@@ -334,11 +333,8 @@
         const latencySpan = document.getElementById('latencySpan');
         const bannerConnType = document.getElementById('bannerConnType');
 
-        // Robust base64 decoder supporting colon-delimited or continuous payloads, plus URL-safe Base64
         function base64ToBytes(base64) {
             let cleaned = base64.trim().replace(/[\s"'\r\n]/g, '');
-            
-            // Handle colon separated (Salt:IV:Ciphertext) by extracting and combining raw bytes
             if (cleaned.includes(':')) {
                 const parts = cleaned.split(':');
                 const salt = base64ToBytes(parts[0]);
@@ -548,27 +544,26 @@
         }
 
         function executeCommand(rawCmd) {
-            appendPromptLine(rawCmd);
+            if (appState.mode === 'sim') {
+                appendPromptLine(rawCmd);
+                const parts = rawCmd.trim().split(/\s+/);
+                const mainCmd = parts[0].toLowerCase();
+                const args = parts.slice(1);
 
-            if (appState.mode === 'live') {
-                if (appState.socket && appState.socket.readyState === WebSocket.OPEN) {
-                    const payload = encoder.encode('0' + rawCmd + '\r');
-                    appState.socket.send(payload);
-                    return;
-                } else {
-                    appendOutput(`\n<span class="text-red-400">[!] WebSocket disconnected. Please re-authenticate Live Tunnel.</span>\n`);
-                    return;
-                }
+                setTimeout(() => {
+                    handleSimulatedCommand(mainCmd, args, rawCmd);
+                    scrollToBottom();
+                }, 60);
+                return;
             }
 
-            const parts = rawCmd.trim().split(/\s+/);
-            const mainCmd = parts[0].toLowerCase();
-            const args = parts.slice(1);
-
-            setTimeout(() => {
-                handleSimulatedCommand(mainCmd, args, rawCmd);
-                scrollToBottom();
-            }, 60);
+            // Live Mode: Direct pipeline to ttyd WebSocket
+            if (appState.socket && appState.socket.readyState === WebSocket.OPEN) {
+                const payload = encoder.encode('0' + rawCmd + '\r');
+                appState.socket.send(payload);
+            } else {
+                appendOutput(`\n<span class="text-red-400">[!] WebSocket disconnected. Please re-authenticate Live Tunnel.</span>\n`);
+            }
         }
 
         function appendPromptLine(cmdText) {
@@ -698,7 +693,12 @@
                     }
 
                     if (text) {
-                        appendOutput(escapeHtml(stripAnsiCodes(text)));
+                        let cleanText = stripAnsiCodes(text);
+                        // Filter out redundant shell prompt lines (~ $) sent from bash
+                        cleanText = cleanText.replace(/~\s*\$/g, '').replace(/\n\s*\n/g, '\n');
+                        if (cleanText.trim() !== '') {
+                            appendOutput(escapeHtml(cleanText));
+                        }
                     }
                 };
 
