@@ -1,260 +1,753 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Terminal Stream</title>
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-    body {
-      background-color: #0d1117;
-      color: #00ff66;
-      font-family: 'Courier New', Courier, monospace;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-    #auth-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: rgba(13, 17, 23, 0.95);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-    .auth-card {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 8px;
-      padding: 24px;
-      width: 320px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-      text-align: center;
-    }
-    .auth-card h2 {
-      font-size: 1.1rem;
-      margin-bottom: 16px;
-      color: #58a6ff;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    .auth-card input {
-      width: 100%;
-      padding: 10px;
-      margin-bottom: 12px;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #fff;
-      font-size: 0.9rem;
-      outline: none;
-    }
-    .auth-card input:focus {
-      border-color: #58a6ff;
-    }
-    .auth-card button {
-      width: 100%;
-      padding: 10px;
-      background: #238636;
-      border: none;
-      border-radius: 6px;
-      color: #fff;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    .auth-card button:hover {
-      background: #2ea043;
-    }
-    #auth-error {
-      color: #f85149;
-      font-size: 0.8rem;
-      margin-top: 10px;
-      display: none;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    #terminal {
-      flex: 1;
-      padding: 12px;
-      white-space: pre-wrap;
-      word-break: break-all;
-      overflow-y: auto;
-      font-size: 14px;
-      line-height: 1.4;
-    }
-    #input-line {
-      display: flex;
-      padding: 8px 12px;
-      background: #161b22;
-      border-top: 1px solid #30363d;
-    }
-    #input-line input {
-      flex: 1;
-      background: transparent;
-      border: none;
-      color: #00ff66;
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 14px;
-      outline: none;
-    }
-  </style>
-</head>
-<body>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Termux Remote Terminal & Tunnel Bridge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
-  <!-- Password Unlock Modal -->
-  <div id="auth-overlay">
-    <div class="auth-card">
-      <h2>Encrypted Terminal Endpoint</h2>
-      <input type="password" id="passphrase" placeholder="Enter password to unlock" autofocus />
-      <button onclick="unlockAndConnect()">Decrypt & Connect</button>
-      <div id="auth-error">Invalid password or decryption failed.</div>
-    </div>
-  </div>
-
-  <!-- Terminal Display -->
-  <div id="terminal"></div>
-  <div id="input-line" style="display: none;">
-    <input type="text" id="command-input" placeholder="Type a command..." autocomplete="off" />
-  </div>
-
-  <script>
-    const ENCRYPTED_PAYLOAD = "XBiuI6KfEjchMlmRzVGDww==:uz2WFKtGaQwwBMi+:XH8+UCc4qfFzXC20fCJL/VboSuCA6dsCKBDWFZk8M8ChoBOWW+EjpCo=";
-
-    let socket = null;
-    const terminalEl = document.getElementById('terminal');
-    const inputContainer = document.getElementById('input-line');
-    const commandInput = document.getElementById('command-input');
-
-    // Robust base64 decoder supporting standard & URL-safe payloads
-    function base64ToBytes(base64) {
-      let cleaned = base64.trim().replace(/[\s"'\r\n]/g, '');
-      cleaned = cleaned.replace(/-/g, '+').replace(/_/g, '/');
-
-      const pad = cleaned.length % 4;
-      if (pad === 2) {
-        cleaned += '==';
-      } else if (pad === 3) {
-        cleaned += '=';
-      } else if (pad === 1) {
-        throw new Error("Invalid Base64 payload length.");
-      }
-
-      const binString = atob(cleaned);
-      return Uint8Array.from(binString, (m) => m.charCodeAt(0));
-    }
-
-    async function decryptEndpoint(passphrase, base64Data) {
-      const encryptedBytes = base64ToBytes(base64Data);
-
-      if (encryptedBytes.length < 28) {
-        throw new Error("Payload too short. Expected Salt (16) + IV (12) + Ciphertext.");
-      }
-
-      const salt = encryptedBytes.subarray(0, 16);
-      const iv = encryptedBytes.subarray(16, 28);
-      const ciphertext = encryptedBytes.subarray(28);
-
-      const encoder = new TextEncoder();
-      const keyMaterial = await crypto.subtle.importKey(
-        "raw", 
-        encoder.encode(passphrase), 
-        "PBKDF2", 
-        false, 
-        ["deriveKey"]
-      );
-
-      const key = await crypto.subtle.deriveKey(
-        {
-          name: "PBKDF2",
-          salt: salt,
-          iterations: 100000,
-          hash: "SHA-256"
-        },
-        keyMaterial,
-        { name: "AES-GCM", length: 256 },
-        false,
-        ["decrypt"]
-      );
-
-      const decryptedBuffer = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: iv },
-        key,
-        ciphertext
-      );
-
-      return new TextDecoder().decode(decryptedBuffer);
-    }
-
-    async function unlockAndConnect() {
-      const password = document.getElementById('passphrase').value;
-      const errorEl = document.getElementById('auth-error');
-      errorEl.style.display = 'none';
-
-      try {
-        const wsUrl = await decryptEndpoint(password, ENCRYPTED_PAYLOAD);
-        document.getElementById('auth-overlay').style.display = 'none';
-        inputContainer.style.display = 'flex';
-        initWebSocket(wsUrl);
-      } catch (e) {
-        console.error("Decryption Error:", e);
-        errorEl.innerText = e.message || "Invalid password or payload corrupted.";
-        errorEl.style.display = 'block';
-      }
-    }
-
-    function stripAnsiCodes(str) {
-      return str.replace(/[\u001b\u009b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-    }
-
-    function initWebSocket(wsUrl) {
-      socket = new WebSocket(wsUrl);
-
-      socket.onopen = () => {
-        appendLog('\n--- Connected to stream ---\n');
-        commandInput.focus();
-      };
-
-      socket.onmessage = (event) => {
-        const cleanData = stripAnsiCodes(event.data);
-        appendLog(cleanData);
-      };
-
-      socket.onclose = () => {
-        appendLog('\n--- [Connection closed] ---\n');
-      };
-
-      socket.onerror = (err) => {
-        console.error('WebSocket Error:', err);
-      };
-
-      commandInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          const val = commandInput.value + '\n';
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(val);
-          }
-          commandInput.value = '';
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #090d16;
+            color: #e2e8f0;
         }
-      });
-    }
 
-    function appendLog(text) {
-      terminalEl.textContent += text;
-      terminalEl.scrollTop = terminalEl.scrollHeight;
-    }
+        .font-mono {
+            font-family: 'Fira Code', monospace;
+        }
 
-    document.getElementById('passphrase').addEventListener('keypress', function (e) {
-      if (e.key === 'Enter') {
-        unlockAndConnect();
-      }
-    });
-  </script>
+        .terminal-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+        .terminal-scroll::-webkit-scrollbar-track {
+            background: #0d1117;
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb {
+            background: #21262d;
+            border-radius: 4px;
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb:hover {
+            background: #30363d;
+        }
+
+        .cursor-blink {
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .terminal-container {
+            box-shadow: 0 0 30px rgba(0, 255, 170, 0.05), inset 0 0 15px rgba(0, 0, 0, 0.8);
+        }
+
+        .scanlines {
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0, 0, 0, 0.2) 50%,
+                rgba(0, 0, 0, 0.2)
+            );
+            background-size: 100% 4px;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden bg-[#090d16] text-gray-200">
+
+    <!-- Navigation Header -->
+    <header class="bg-[#161b22] border-b border-gray-800 px-4 py-2.5 flex items-center justify-between z-10 select-none">
+        <div class="flex items-center space-x-3">
+            <div class="flex items-center space-x-2 text-emerald-400 font-bold font-mono text-lg">
+                <i class="fa-solid fa-terminal text-xl"></i>
+                <span>TERMUX<span class="text-gray-400 font-normal">::CONNECT</span></span>
+            </div>
+            <span class="hidden sm:inline-block bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 text-xs px-2 py-0.5 rounded font-mono">
+                v2.4.0-cloudflared
+            </span>
+        </div>
+
+        <div class="flex items-center space-x-3 text-sm">
+            <div class="hidden md:flex items-center bg-[#0d1117] rounded-lg p-1 border border-gray-800 text-xs">
+                <button id="modeSimBtn" onclick="setMode('sim')" class="px-2.5 py-1 rounded-md font-medium transition text-emerald-400 bg-gray-800">
+                    <i class="fa-solid fa-flask mr-1"></i> Simulator
+                </button>
+                <button id="modeLiveBtn" onclick="requestLiveModeSwitch()" class="px-2.5 py-1 rounded-md font-medium transition text-gray-400 hover:text-gray-200">
+                    <i class="fa-solid fa-lock mr-1"></i> Live Tunnel
+                </button>
+            </div>
+
+            <div id="statusBadge" class="flex items-center space-x-2 bg-emerald-950/50 border border-emerald-800/60 text-emerald-400 px-3 py-1 rounded-full text-xs font-mono">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span id="statusText">SIMULATOR ACTIVE</span>
+                <span id="latencySpan" class="text-gray-400 border-l border-emerald-800/60 pl-2 ml-1 hidden">12ms</span>
+            </div>
+
+            <button onclick="toggleModal('configModal')" class="bg-[#21262d] hover:bg-[#30363d] text-gray-200 px-3 py-1.5 rounded-lg border border-gray-700 transition flex items-center space-x-1.5 text-xs font-medium">
+                <i class="fa-solid fa-gear"></i>
+                <span class="hidden sm:inline">Settings & Encrypter</span>
+            </button>
+
+            <button onclick="toggleModal('docsModal')" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 text-xs font-medium">
+                <i class="fa-solid fa-book"></i>
+                <span class="hidden sm:inline">Setup Guide</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col p-2 sm:p-4 overflow-hidden relative">
+        <div class="flex-1 bg-[#0d1117] border border-gray-800 rounded-xl flex flex-col overflow-hidden terminal-container relative">
+            
+            <div class="bg-[#161b22] px-4 py-2 border-b border-gray-800/80 flex items-center justify-between text-xs text-gray-400 font-mono select-none">
+                <div class="flex items-center space-x-2">
+                    <span class="w-3 h-3 rounded-full bg-red-500/80 inline-block"></span>
+                    <span class="w-3 h-3 rounded-full bg-yellow-500/80 inline-block"></span>
+                    <span class="w-3 h-3 rounded-full bg-green-500/80 inline-block"></span>
+                    <span class="ml-2 font-semibold text-gray-300 flex items-center gap-1.5">
+                        <i class="fa-brands fa-android text-emerald-400"></i>
+                        <span id="termTitle">termux@android:~ (tty1)</span>
+                    </span>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button onclick="clearTerminal()" class="hover:text-emerald-400 transition" title="Clear Screen">
+                        <i class="fa-solid fa-eraser"></i> Clear
+                    </button>
+                    <button onclick="toggleScanlines()" class="hover:text-emerald-400 transition" title="Toggle CRT Scanlines">
+                        <i class="fa-solid fa-tv"></i> CRT
+                    </button>
+                    <button onclick="fitTerminal()" class="hover:text-emerald-400 transition" title="Focus Prompt">
+                        <i class="fa-solid fa-expand"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Terminal Screen -->
+            <div id="terminalScreen" onclick="focusPrompt()" class="flex-1 p-4 font-mono text-sm overflow-y-auto terminal-scroll leading-relaxed relative">
+                <div id="scanlinesOverlay" class="scanlines absolute inset-0 pointer-events-none opacity-30"></div>
+                
+                <div id="welcomeBanner" class="mb-4 text-gray-400">
+                    <pre class="text-emerald-400 font-bold hidden sm:block text-xs leading-none mb-2">
+  _____                                      _____                      _ 
+ |_   _|__ _ __ _ __ ___  _   ___  __       |  ___|__  _ __  ___  _   _| |
+   | |/ _ \ '__| '_ ` _ \| | | \ \/ /  ___  | |_ / _ \| '__|/ _ \| | | | |
+   | |  __/ |  | | | | | | |_| |>  <  |___| |  _| (_) | |  | (_) | |_| |_|
+   |_|\___|_|  |_| |_| |_|\__,_/_/\_\       |_|  \___/|_|   \___/ \__, (_)
+                                                                  |___/   
+                    </pre>
+                    <p class="text-emerald-400 font-semibold sm:hidden mb-1">=== TERMUX REMOTE CONSOLE ===</p>
+                    <p class="text-xs text-gray-400">Welcome to Termux Web Shell Interface.</p>
+                    <p class="text-xs text-gray-400">Type <span class="text-yellow-400 font-semibold">help</span> to view simulated commands or connect your live phone via <span class="text-emerald-400">Settings</span>.</p>
+                    <div class="mt-2 text-xs border-l-2 border-emerald-500/50 pl-2 text-gray-400 space-y-0.5">
+                        <p>Architecture: <span class="text-gray-200">aarch64 (Android 14)</span> | Shell: <span class="text-gray-200">bash 5.2.21</span></p>
+                        <p>Connection: <span id="bannerConnType" class="text-emerald-400 font-medium">Local Emulation Engine</span></p>
+                    </div>
+                </div>
+
+                <div id="outputBuffer" class="space-y-1"></div>
+
+                <div class="flex items-center mt-2 flex-wrap" id="promptRow">
+                    <span id="promptLabel" class="text-emerald-400 font-semibold mr-2 select-none">termux@android:~$</span>
+                    <div class="relative flex-1 flex items-center min-w-[200px]">
+                        <input type="text" id="cmdInput" 
+                            class="w-full bg-transparent text-gray-100 border-none outline-none font-mono text-sm p-0 m-0 focus:ring-0"
+                            autocomplete="off" spellcheck="false" autofocus />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Keys -->
+            <div class="bg-[#161b22] border-t border-gray-800 p-1.5 flex items-center space-x-1 overflow-x-auto text-xs font-mono select-none">
+                <span class="text-gray-400 px-2 text-[10px] uppercase tracking-wider font-semibold">Quick:</span>
+                <button onclick="sendQuickCmd('pkg update && pkg upgrade -y')" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">pkg update</button>
+                <button onclick="sendQuickCmd('termux-battery-status')" class="bg-[#21262d] hover:bg-gray-700 text-emerald-400 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">battery-status</button>
+                <button onclick="sendQuickCmd('htop')" class="bg-[#21262d] hover:bg-gray-700 text-cyan-400 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">htop</button>
+                <button onclick="sendQuickCmd('ls -la')" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">ls -la</button>
+                <button onclick="sendQuickCmd('clear')" class="bg-[#21262d] hover:bg-gray-700 text-yellow-400 px-2.5 py-1 rounded border border-gray-700 whitespace-nowrap">clear</button>
+                <button onclick="triggerKeyUp()" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-700"><i class="fa-solid fa-arrow-up"></i></button>
+                <button onclick="triggerKeyDown()" class="bg-[#21262d] hover:bg-gray-700 text-gray-300 px-2 py-1 rounded border border-gray-700"><i class="fa-solid fa-arrow-down"></i></button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Settings / Tunnel Config Modal -->
+    <div id="configModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-[#161b22] border border-gray-800 rounded-xl w-full max-w-lg overflow-hidden shadow-2xl">
+            <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                <h3 class="font-bold text-gray-100 flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-emerald-400"></i> Tunnel & Encryption Settings
+                </h3>
+                <button onclick="toggleModal('configModal')" class="text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <div class="p-5 space-y-4 text-sm max-h-[75vh] overflow-y-auto terminal-scroll">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Execution Mode</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="modalSimBtn" onclick="setMode('sim')" class="p-3 border rounded-lg text-left flex flex-col justify-between transition border-emerald-500 bg-emerald-950/20">
+                            <span class="font-bold text-emerald-400"><i class="fa-solid fa-flask mr-1"></i> Simulator Mode</span>
+                            <span class="text-xs text-gray-400 mt-1">Interactive built-in shell with mock Termux APIs.</span>
+                        </button>
+                        <button id="modalLiveBtn" onclick="requestLiveModeSwitch()" class="p-3 border border-gray-700 rounded-lg text-left flex flex-col justify-between hover:border-gray-600 transition">
+                            <span class="font-bold text-gray-300"><i class="fa-solid fa-key mr-1"></i> Live Tunnel</span>
+                            <span class="text-xs text-gray-400 mt-1">Decrypt hardcoded payload & connect WebSocket.</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="border-t border-gray-800 pt-4 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h4 class="font-bold text-xs uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                            <i class="fa-solid fa-shield-halved"></i> Cloudflare Config Encrypter
+                        </h4>
+                        <span class="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded">AES-256-GCM</span>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-xs font-medium text-gray-300 mb-1">WebSocket URL / Tunnel String</label>
+                        <input type="text" id="encUrlInput" value="wss://subd.domain.com/ws" 
+                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-gray-300 mb-1">Encryption Secret Password</label>
+                        <input type="password" id="encPassInput" placeholder="Enter password to lock payload" 
+                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
+                    </div>
+
+                    <button onclick="generateEncryptedPayload()" class="w-full py-2 text-xs font-medium bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-lock"></i> Encrypt Payload
+                    </button>
+
+                    <div id="encResultContainer" class="hidden space-y-1">
+                        <label class="block text-xs font-medium text-emerald-400">Encrypted Payload (Base64):</label>
+                        <div class="relative">
+                            <textarea id="encResultText" readonly class="w-full h-20 bg-[#0d1117] border border-gray-700 rounded-lg p-2 text-[11px] font-mono text-gray-300 resize-none focus:outline-none"></textarea>
+                            <button onclick="copyEncryptedPayload()" class="absolute top-2 right-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-[10px] px-2 py-1 rounded border border-gray-600">
+                                <i class="fa-solid fa-copy mr-1"></i> Copy
+                            </button>
+                        </div>
+                        <p class="text-[10px] text-gray-500">Paste this string into <code class="text-emerald-400">HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD</code> in your JavaScript.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="px-5 py-3 bg-[#0d1117] border-t border-gray-800 flex justify-end">
+                <button onclick="toggleModal('configModal')" class="px-4 py-1.5 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Decryption Password Prompt Modal -->
+    <div id="decryptModal" class="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-[#161b22] border border-emerald-500/40 rounded-xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between bg-emerald-950/20">
+                <h3 class="font-bold text-gray-100 flex items-center gap-2 text-sm">
+                    <i class="fa-solid fa-key text-emerald-400"></i> Authenticate Live Tunnel Connection
+                </h3>
+                <button onclick="toggleModal('decryptModal')" class="text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <form onsubmit="handleDecryptSubmit(event)" class="p-5 space-y-4 text-sm">
+                <p class="text-xs text-gray-300 leading-relaxed">
+                    Enter your password to unlock the hardcoded tunnel payload.
+                </p>
+
+                <div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">Decryption Password</label>
+                    <input type="password" id="decryptPassInput" placeholder="Enter secret password" autofocus required
+                        class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-gray-200 font-mono text-xs focus:outline-none focus:border-emerald-500">
+                </div>
+
+                <div id="decryptErrorMsg" class="hidden text-xs text-red-400 bg-red-950/40 border border-red-800/60 p-2.5 rounded-lg flex items-center gap-2">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span>Invalid password or decryption failed.</span>
+                </div>
+
+                <div class="flex justify-end space-x-2 pt-2">
+                    <button type="button" onclick="toggleModal('decryptModal')" class="px-4 py-1.5 text-xs font-medium text-gray-400 hover:text-white">Cancel</button>
+                    <button type="submit" id="decryptSubmitBtn" class="px-4 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-unlock"></i>
+                        <span>Decrypt & Connect</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Documentation Modal -->
+    <div id="docsModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-[#161b22] border border-gray-800 rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
+            <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                <h3 class="font-bold text-gray-100 flex items-center gap-2">
+                    <i class="fa-solid fa-book-bookmark text-emerald-400"></i> Setup Guide
+                </h3>
+                <button onclick="toggleModal('docsModal')" class="text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <div class="p-5 overflow-y-auto space-y-4 text-xs leading-relaxed terminal-scroll">
+                <div class="bg-emerald-950/40 border border-emerald-800/60 p-3 rounded-lg text-emerald-300">
+                    <p class="font-semibold mb-1"><i class="fa-solid fa-circle-info mr-1"></i> How to host & connect:</p>
+                    <p class="text-gray-300">Run <code class="text-emerald-400 font-mono">ttyd</code> in Termux and expose it with <code class="text-emerald-400 font-mono">cloudflared</code>.</p>
+                </div>
+            </div>
+
+            <div class="px-5 py-3 bg-[#0d1117] border-t border-gray-800 flex justify-end">
+                <button onclick="toggleModal('docsModal')" class="px-4 py-1.5 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg transition">Got it</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // HARDCODED ENCRYPTED PAYLOAD (Base64 Salt + IV + Ciphertext OR Colon Separated)
+        let HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD = "REPLACE_WITH_YOUR_BASE64_ENCRYPTED_ENDPOINT_STRING";
+
+        let appState = {
+            mode: 'sim',
+            wsEndpoint: '',
+            promptPrefix: 'termux@android:~$',
+            cmdHistory: [],
+            historyIndex: -1,
+            socket: null,
+            connected: true,
+            currentDir: '~'
+        };
+
+        const encoder = new TextEncoder();
+
+        const cmdInput = document.getElementById('cmdInput');
+        const outputBuffer = document.getElementById('outputBuffer');
+        const terminalScreen = document.getElementById('terminalScreen');
+        const promptLabel = document.getElementById('promptLabel');
+        const statusBadge = document.getElementById('statusBadge');
+        const statusText = document.getElementById('statusText');
+        const latencySpan = document.getElementById('latencySpan');
+        const bannerConnType = document.getElementById('bannerConnType');
+
+        // Robust base64 decoder supporting colon-delimited or continuous payloads, plus URL-safe Base64
+        function base64ToBytes(base64) {
+            let cleaned = base64.trim().replace(/[\s"'\r\n]/g, '');
+            
+            // Handle colon separated (Salt:IV:Ciphertext) by extracting and combining raw bytes
+            if (cleaned.includes(':')) {
+                const parts = cleaned.split(':');
+                const salt = base64ToBytes(parts[0]);
+                const iv = base64ToBytes(parts[1]);
+                const cipher = base64ToBytes(parts[2]);
+                const combined = new Uint8Array(salt.length + iv.length + cipher.length);
+                combined.set(salt, 0);
+                combined.set(iv, salt.length);
+                combined.set(cipher, salt.length + iv.length);
+                return combined;
+            }
+
+            cleaned = cleaned.replace(/-/g, '+').replace(/_/g, '/');
+            const pad = cleaned.length % 4;
+            if (pad === 2) cleaned += '==';
+            else if (pad === 3) cleaned += '=';
+
+            const binString = atob(cleaned);
+            return Uint8Array.from(binString, (m) => m.charCodeAt(0));
+        }
+
+        function bufferToBase64(buf) {
+            const bytes = new Uint8Array(buf);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return btoa(binary);
+        }
+
+        async function deriveKey(password, salt) {
+            const enc = new TextEncoder();
+            const keyMaterial = await window.crypto.subtle.importKey(
+                "raw",
+                enc.encode(password),
+                { name: "PBKDF2" },
+                false,
+                ["deriveKey"]
+            );
+            return window.crypto.subtle.deriveKey(
+                {
+                    name: "PBKDF2",
+                    salt: salt,
+                    iterations: 100000,
+                    hash: "SHA-256"
+                },
+                keyMaterial,
+                { name: "AES-GCM", length: 256 },
+                false,
+                ["encrypt", "decrypt"]
+            );
+        }
+
+        async function encryptPayload(plaintext, password) {
+            const enc = new TextEncoder();
+            const salt = window.crypto.getRandomValues(new Uint8Array(16));
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const key = await deriveKey(password, salt);
+
+            const encrypted = await window.crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                enc.encode(plaintext)
+            );
+
+            const combined = new Uint8Array(16 + 12 + encrypted.byteLength);
+            combined.set(salt, 0);
+            combined.set(iv, 16);
+            combined.set(new Uint8Array(encrypted), 28);
+
+            return bufferToBase64(combined);
+        }
+
+        async function decryptEndpoint(passphrase, base64Data) {
+            const encryptedBytes = base64ToBytes(base64Data);
+
+            if (encryptedBytes.length < 28) {
+                throw new Error("Payload too short. Expected Salt (16) + IV (12) + Ciphertext.");
+            }
+
+            const salt = encryptedBytes.subarray(0, 16);
+            const iv = encryptedBytes.subarray(16, 28);
+            const ciphertext = encryptedBytes.subarray(28);
+
+            const key = await deriveKey(passphrase, salt);
+
+            const decryptedBuffer = await window.crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                ciphertext
+            );
+
+            return new TextDecoder().decode(decryptedBuffer);
+        }
+
+        async function generateEncryptedPayload() {
+            const url = document.getElementById('encUrlInput').value.trim();
+            const pass = document.getElementById('encPassInput').value.trim();
+            const resultBox = document.getElementById('encResultContainer');
+            const resultText = document.getElementById('encResultText');
+
+            if (!url || !pass) {
+                alert("Please provide both a WebSocket URL and an Encryption Password.");
+                return;
+            }
+
+            try {
+                const encryptedBase64 = await encryptPayload(url, pass);
+                resultText.value = encryptedBase64;
+                resultBox.classList.remove('hidden');
+            } catch (err) {
+                alert("Error generating encrypted payload: " + err.message);
+            }
+        }
+
+        function copyEncryptedPayload() {
+            const textarea = document.getElementById('encResultText');
+            textarea.select();
+            document.execCommand('copy');
+            alert("Encrypted payload copied to clipboard!");
+        }
+
+        function toggleModal(id, forceState = null) {
+            const modal = document.getElementById(id);
+            if (!modal) return;
+            if (forceState !== null) {
+                if (forceState) modal.classList.remove('hidden');
+                else modal.classList.add('hidden');
+            } else {
+                modal.classList.toggle('hidden');
+            }
+        }
+
+        function requestLiveModeSwitch() {
+            const errorMsg = document.getElementById('decryptErrorMsg');
+            const passInput = document.getElementById('decryptPassInput');
+            if (errorMsg) errorMsg.classList.add('hidden');
+            if (passInput) passInput.value = '';
+            toggleModal('decryptModal', true);
+            setTimeout(() => {
+                if (passInput) passInput.focus();
+            }, 100);
+        }
+
+        async function handleDecryptSubmit(event) {
+            event.preventDefault();
+            const passInput = document.getElementById('decryptPassInput');
+            const errorMsg = document.getElementById('decryptErrorMsg');
+            const submitBtn = document.getElementById('decryptSubmitBtn');
+
+            const password = passInput ? passInput.value : '';
+            if (!password) return;
+
+            try {
+                if (submitBtn) submitBtn.disabled = true;
+                const decryptedUrl = await decryptEndpoint(password, HARDCODED_ENCRYPTED_TUNNEL_PAYLOAD);
+                
+                if (errorMsg) errorMsg.classList.add('hidden');
+                toggleModal('decryptModal', false);
+                
+                setMode('live');
+                appState.wsEndpoint = decryptedUrl;
+                connectLiveWebSocket(decryptedUrl);
+            } catch (err) {
+                console.error("Decryption failed:", err);
+                if (errorMsg) {
+                    errorMsg.classList.remove('hidden');
+                    const errTextSpan = errorMsg.querySelector('span');
+                    if (errTextSpan) {
+                        errTextSpan.innerText = err.message || "Invalid password or payload corrupted.";
+                    }
+                }
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
+        }
+
+        function triggerKeyUp() {
+            if (appState.cmdHistory.length === 0) return;
+            if (appState.historyIndex > 0) {
+                appState.historyIndex--;
+            } else if (appState.historyIndex === -1) {
+                appState.historyIndex = appState.cmdHistory.length - 1;
+            }
+            if (cmdInput) {
+                cmdInput.value = appState.cmdHistory[appState.historyIndex] || '';
+            }
+        }
+
+        function triggerKeyDown() {
+            if (appState.cmdHistory.length > 0 && appState.historyIndex < appState.cmdHistory.length - 1) {
+                appState.historyIndex++;
+                cmdInput.value = appState.cmdHistory[appState.historyIndex];
+            } else {
+                appState.historyIndex = appState.cmdHistory.length;
+                cmdInput.value = '';
+            }
+        }
+
+        function focusPrompt() {
+            cmdInput.focus();
+        }
+
+        function sendQuickCmd(cmd) {
+            cmdInput.value = cmd;
+            cmdInput.focus();
+        }
+
+        function executeCommand(rawCmd) {
+            appendPromptLine(rawCmd);
+
+            if (appState.mode === 'live') {
+                if (appState.socket && appState.socket.readyState === WebSocket.OPEN) {
+                    const payload = encoder.encode('0' + rawCmd + '\r');
+                    appState.socket.send(payload);
+                    return;
+                } else {
+                    appendOutput(`\n<span class="text-red-400">[!] WebSocket disconnected. Please re-authenticate Live Tunnel.</span>\n`);
+                    return;
+                }
+            }
+
+            const parts = rawCmd.trim().split(/\s+/);
+            const mainCmd = parts[0].toLowerCase();
+            const args = parts.slice(1);
+
+            setTimeout(() => {
+                handleSimulatedCommand(mainCmd, args, rawCmd);
+                scrollToBottom();
+            }, 60);
+        }
+
+        function appendPromptLine(cmdText) {
+            const line = document.createElement('div');
+            line.className = 'flex items-start flex-wrap font-mono';
+            line.innerHTML = `<span class="text-emerald-400 font-semibold mr-2">${appState.promptPrefix}</span> <span class="text-gray-100">${escapeHtml(cmdText)}</span>`;
+            outputBuffer.appendChild(line);
+            scrollToBottom();
+        }
+
+        function appendOutput(content, colorClass = 'text-gray-300') {
+            const block = document.createElement('div');
+            block.className = `font-mono text-xs sm:text-sm whitespace-pre-wrap ${colorClass}`;
+            block.innerHTML = content;
+            outputBuffer.appendChild(block);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            terminalScreen.scrollTop = terminalScreen.scrollHeight;
+        }
+
+        function clearTerminal() {
+            outputBuffer.innerHTML = '';
+            cmdInput.value = '';
+            focusPrompt();
+        }
+
+        function toggleScanlines() {
+            const overlay = document.getElementById('scanlinesOverlay');
+            overlay.classList.toggle('hidden');
+        }
+
+        function fitTerminal() {
+            focusPrompt();
+        }
+
+        function stripAnsiCodes(str) {
+            return str.replace(/[\u001b\u009b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+        }
+
+        function handleSimulatedCommand(cmd, args, fullCmd) {
+            switch (cmd) {
+                case 'help':
+                    appendOutput(
+                        `<span class="text-yellow-400 font-bold">Simulated Termux Shell Commands:</span>\n` +
+                        `  <span class="text-emerald-400">termux-battery-status</span>  - Get phone battery info\n` +
+                        `  <span class="text-emerald-400">pkg / apt [update/install]</span>- Package manager operations\n` +
+                        `  <span class="text-emerald-400">htop, ls, cd, pwd, echo, clear</span>- System utilities`
+                    );
+                    break;
+                case 'termux-battery-status':
+                    appendOutput(`{\n  <span class="text-cyan-400">"percentage"</span>: 88,\n  <span class="text-cyan-400">"status"</span>: <span class="text-green-400">"CHARGING"</span>\n}`);
+                    break;
+                case 'ls':
+                    appendOutput(`<span class="text-blue-400 font-bold">storage</span>  <span class="text-emerald-400 font-bold">scripts</span>  <span class="text-white">downloads</span>`);
+                    break;
+                case 'pwd':
+                    appendOutput(`/data/data/com.termux/files/home`);
+                    break;
+                case 'clear':
+                    clearTerminal();
+                    break;
+                default:
+                    appendOutput(`bash: ${escapeHtml(cmd)}: command not found`, 'text-red-400');
+                    break;
+            }
+        }
+
+        function setMode(mode) {
+            appState.mode = mode;
+            const simBtn = document.getElementById('modeSimBtn');
+            const liveBtn = document.getElementById('modeLiveBtn');
+
+            if (mode === 'sim') {
+                simBtn.className = "px-2.5 py-1 rounded-md font-medium transition text-emerald-400 bg-gray-800";
+                liveBtn.className = "px-2.5 py-1 rounded-md font-medium transition text-gray-400 hover:text-gray-200";
+                statusBadge.className = "flex items-center space-x-2 bg-emerald-950/50 border border-emerald-800/60 text-emerald-400 px-3 py-1 rounded-full text-xs font-mono";
+                statusText.innerText = "SIMULATOR ACTIVE";
+                latencySpan.classList.add('hidden');
+                bannerConnType.innerText = "Local Emulation Engine";
+
+                if (appState.socket) {
+                    appState.socket.close();
+                    appState.socket = null;
+                }
+            } else {
+                liveBtn.className = "px-2.5 py-1 rounded-md font-medium transition text-emerald-400 bg-gray-800";
+                simBtn.className = "px-2.5 py-1 rounded-md font-medium transition text-gray-400 hover:text-gray-200";
+                statusBadge.className = "flex items-center space-x-2 bg-yellow-950/50 border border-yellow-800/60 text-yellow-400 px-3 py-1 rounded-full text-xs font-mono";
+                statusText.innerText = "DECRYPTED TUNNEL";
+                bannerConnType.innerText = "Cloudflare Tunnel (Decrypted Payload)";
+            }
+        }
+
+        function connectLiveWebSocket(url) {
+            statusBadge.className = "flex items-center space-x-2 bg-yellow-950/50 border border-yellow-800/60 text-yellow-400 px-3 py-1 rounded-full text-xs font-mono";
+            statusText.innerText = "CONNECTING...";
+
+            try {
+                appState.socket = new WebSocket(url, 'tty');
+                appState.socket.binaryType = 'arraybuffer';
+
+                appState.socket.onopen = function() {
+                    statusBadge.className = "flex items-center space-x-2 bg-emerald-950/50 border border-emerald-800/60 text-emerald-400 px-3 py-1 rounded-full text-xs font-mono";
+                    statusText.innerText = "CONNECTED TUNNEL";
+                    latencySpan.classList.remove('hidden');
+                    latencySpan.innerText = "42ms";
+                    appendOutput(`\n<span class="text-emerald-400 font-bold">[+] Connected to live Cloudflare Tunnel stream</span>\n`);
+
+                    const handshake = JSON.stringify({ AuthToken: "", columns: 80, rows: 24 });
+                    appState.socket.send(encoder.encode(handshake));
+                    appState.socket.send(encoder.encode('1' + JSON.stringify({ columns: 80, rows: 24 })));
+                };
+
+                appState.socket.onmessage = function(event) {
+                    let text = "";
+                    if (event.data instanceof ArrayBuffer) {
+                        const view = new Uint8Array(event.data);
+                        if (view.length === 0) return;
+                        const cmdByte = String.fromCharCode(view[0]);
+                        if (cmdByte === '0') {
+                            text = new TextDecoder('utf-8').decode(view.subarray(1));
+                        }
+                    } else if (typeof event.data === 'string') {
+                        text = event.data;
+                    }
+
+                    if (text) {
+                        appendOutput(escapeHtml(stripAnsiCodes(text)));
+                    }
+                };
+
+                appState.socket.onerror = function() {
+                    statusBadge.className = "flex items-center space-x-2 bg-red-950/50 border border-red-800/60 text-red-400 px-3 py-1 rounded-full text-xs font-mono";
+                    statusText.innerText = "DISCONNECTED";
+                };
+
+                appState.socket.onclose = function() {
+                    statusBadge.className = "flex items-center space-x-2 bg-red-950/50 border border-red-800/60 text-red-400 px-3 py-1 rounded-full text-xs font-mono";
+                    statusText.innerText = "DISCONNECTED";
+                };
+            } catch (err) {
+                appendOutput(`\n<span class="text-red-400">[!] WebSocket Error: ${err.message}</span>\n`);
+            }
+        }
+
+        function escapeHtml(text) {
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        window.onload = function() {
+            focusPrompt();
+            if (cmdInput) {
+                cmdInput.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const rawCmd = cmdInput.value;
+                        if (rawCmd.trim()) {
+                            appState.cmdHistory.push(rawCmd);
+                            appState.historyIndex = appState.cmdHistory.length;
+                        }
+                        executeCommand(rawCmd);
+                        cmdInput.value = '';
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        triggerKeyUp();
+                    } else if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        triggerKeyDown();
+                    }
+                });
+            }
+        };
+    </script>
 </body>
 </html>
